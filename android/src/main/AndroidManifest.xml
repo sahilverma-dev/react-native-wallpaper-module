@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Normal permission: granted at install time, no runtime dialog. -->
+  <uses-permission android:name="android.permission.SET_WALLPAPER" />
+
+  <!-- Required only when a remote http(s) image is passed to setWallpaper(). -->
+  <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

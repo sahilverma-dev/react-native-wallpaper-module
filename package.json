@@ -1,0 +1,84 @@
+{
+  "name": "@sahilverma-dev/wallpaper-module",
+  "version": "0.1.0",
+  "description": "Apply Android wallpapers from React Native and Expo",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "files": [
+    "build",
+    "android",
+    "!android/build",
+    "!android/.gradle",
+    "!android/.kotlin",
+    "plugin/build",
+    "!plugin/build/*.tsbuildinfo",
+    "app.plugin.js",
+    "expo-module.config.json",
+    "src",
+    "!src/__tests__",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node internal/module_scripts/build.js",
+    "clean": "node internal/module_scripts/clean.js",
+    "lint": "eslint src/ plugin/ example/App.tsx",
+    "test": "node internal/module_scripts/test.js",
+    "prepare": "node internal/module_scripts/prepare.js",
+    "open:ios": "node internal/module_scripts/open-ios.js",
+    "open:android": "node internal/module_scripts/open-android.js"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "expo-module",
+    "wallpaper",
+    "android",
+    "wallpaper-manager",
+    "lock-screen"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sahilverma-dev/wallpaper-module"
+  },
+  "bugs": {
+    "url": "https://github.com/sahilverma-dev/wallpaper-module/issues"
+  },
+  "author": "Sahil Verma <domainsahil007@gmail.com> (https://github.com/sahilverma-dev)",
+  "license": "MIT",
+  "homepage": "https://github.com/sahilverma-dev/wallpaper-module#readme",
+  "dependencies": {},
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@expo/config-plugins": "^58.0.11",
+    "@react-native/jest-preset": "0.88.1",
+    "@types/jest": "^30.0.0",
+    "@types/react": "~19.3.0",
+    "babel-preset-expo": "~58.0.22",
+    "eslint": "~9.39.4",
+    "eslint-config-universe": "^16.1.2",
+    "expo": "^58.0.21",
+    "jest": "^30.0.0",
+    "jest-expo": "~58.0.13",
+    "prettier": "^3.0.0",
+    "react": "19.3.0",
+    "react-native": "0.88.1",
+    "typescript": "~6.0.3"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "roots": [
+      "<rootDir>/src"
+    ]
+  },
+  "peerDependencies": {
+    "expo": ">=54.0.0",
+    "react": "*",
+    "react-native": "*"
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  }
+}
