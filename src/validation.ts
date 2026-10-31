@@ -1,4 +1,6 @@
 import type {
+  LiveWallpaperMotion,
+  SetLiveWallpaperImageOptions,
   SetWallpaperOptions,
   WallpaperCrop,
   WallpaperScreen,
@@ -167,5 +169,36 @@ export function normalizeSetWallpaperOptions(
     target: normalizeTarget(options.target),
     allowBackup: normalizeAllowBackup(options.allowBackup),
     crop: normalizeCrop(options.crop),
+  };
+}
+
+export function normalizeMotion(value: unknown): LiveWallpaperMotion {
+  if (value === undefined || value === null) {
+    return 'pan';
+  }
+  if (value === 'pan' || value === 'none') {
+    return value;
+  }
+  throw new WallpaperError('E_INVALID_ARGUMENT', '`motion` must be "pan" or "none".');
+}
+
+export interface NormalizedSetLiveWallpaperImageOptions {
+  uri: string;
+  motion: LiveWallpaperMotion;
+}
+
+export function normalizeSetLiveWallpaperImageOptions(
+  options: SetLiveWallpaperImageOptions
+): NormalizedSetLiveWallpaperImageOptions {
+  if (typeof options !== 'object' || options === null || Array.isArray(options)) {
+    throw new WallpaperError(
+      'E_INVALID_ARGUMENT',
+      '`setLiveWallpaperImage` expects an object with a `uri` string.'
+    );
+  }
+
+  return {
+    uri: normalizeUri(options.uri),
+    motion: normalizeMotion(options.motion),
   };
 }

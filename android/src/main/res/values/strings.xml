@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="expo_wallpaper_live_label">Animated wallpaper</string>
+  <string name="expo_wallpaper_live_description">A slowly animated wallpaper using your chosen image, or a color gradient when no image is set.</string>
+</resources>

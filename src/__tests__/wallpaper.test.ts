@@ -2,9 +2,14 @@ import { requireNativeModule } from 'expo';
 import { Platform } from 'react-native';
 
 import {
+  clearLiveWallpaperImage,
+  getCurrentLiveWallpaper,
   getWallpaperId,
+  isLiveWallpaperSupported,
   isSetWallpaperAllowed,
   isWallpaperSupported,
+  openLiveWallpaperPicker,
+  setLiveWallpaperImage,
   setWallpaper,
 } from '../WallpaperModule';
 import { setWallpaperNativeModule } from '../WallpaperNativeModule';
@@ -17,12 +22,22 @@ const nativeSetWallpaper = jest.fn();
 const nativeIsWallpaperSupported = jest.fn();
 const nativeIsSetWallpaperAllowed = jest.fn();
 const nativeGetWallpaperId = jest.fn();
+const nativeIsLiveWallpaperSupported = jest.fn();
+const nativeGetCurrentLiveWallpaper = jest.fn();
+const nativeSetLiveWallpaperImage = jest.fn();
+const nativeClearLiveWallpaperImage = jest.fn();
+const nativeOpenLiveWallpaperPicker = jest.fn();
 
 const bridge = {
   setWallpaper: nativeSetWallpaper,
   isWallpaperSupported: nativeIsWallpaperSupported,
   isSetWallpaperAllowed: nativeIsSetWallpaperAllowed,
   getWallpaperId: nativeGetWallpaperId,
+  isLiveWallpaperSupported: nativeIsLiveWallpaperSupported,
+  getCurrentLiveWallpaper: nativeGetCurrentLiveWallpaper,
+  setLiveWallpaperImage: nativeSetLiveWallpaperImage,
+  clearLiveWallpaperImage: nativeClearLiveWallpaperImage,
+  openLiveWallpaperPicker: nativeOpenLiveWallpaperPicker,
 };
 
 function setPlatform(os: string) {
@@ -37,6 +52,11 @@ beforeEach(() => {
   nativeIsWallpaperSupported.mockResolvedValue(true);
   nativeIsSetWallpaperAllowed.mockResolvedValue(true);
   nativeGetWallpaperId.mockResolvedValue(3);
+  nativeIsLiveWallpaperSupported.mockResolvedValue(true);
+  nativeGetCurrentLiveWallpaper.mockResolvedValue(null);
+  nativeSetLiveWallpaperImage.mockResolvedValue(undefined);
+  nativeClearLiveWallpaperImage.mockResolvedValue(undefined);
+  nativeOpenLiveWallpaperPicker.mockResolvedValue(undefined);
 
   setWallpaperNativeModule(bridge as never);
 });
@@ -213,5 +233,105 @@ describe('getWallpaperId', () => {
       code: 'E_UNSUPPORTED_TARGET',
     });
     expect(nativeGetWallpaperId).not.toHaveBeenCalled();
+  });
+});
+
+describe('live wallpapers', () => {
+  it('configures the image with the default pan motion', async () => {
+    await setLiveWallpaperImage({ uri: 'file:///tmp/live.jpg' });
+
+    expect(nativeSetLiveWallpaperImage).toHaveBeenCalledWith('file:///tmp/live.jpg', 'pan');
+  });
+
+  it('forwards the static motion option', async () => {
+    await setLiveWallpaperImage({ uri: 'content://media/external/images/9', motion: 'none' });
+
+    expect(nativeSetLiveWallpaperImage).toHaveBeenCalledWith(
+      'content://media/external/images/9',
+      'none'
+    );
+  });
+
+  it.each([
+    [null, 'E_INVALID_ARGUMENT'],
+    [{}, 'E_INVALID_URI'],
+    [{ uri: 'data:image/jpeg;base64,AA' }, 'E_INVALID_URI'],
+    [{ uri: 'file:///a.jpg', motion: 'spin' }, 'E_INVALID_ARGUMENT'],
+    [{ uri: 'file:///a.jpg', motion: 1 }, 'E_INVALID_ARGUMENT'],
+  ])('rejects invalid live wallpaper options %j with %s', async (options, code) => {
+    await expect(setLiveWallpaperImage(options as never)).rejects.toMatchObject({ code });
+    expect(nativeSetLiveWallpaperImage).not.toHaveBeenCalled();
+  });
+
+  it('clears the configured image', async () => {
+    await clearLiveWallpaperImage();
+
+    expect(nativeClearLiveWallpaperImage).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports support and the active live wallpaper', async () => {
+    nativeGetCurrentLiveWallpaper.mockResolvedValueOnce({
+      packageName: 'com.example.app',
+      className: 'com.example.app.wallpaper.Service',
+      isOurs: true,
+    });
+
+    await expect(isLiveWallpaperSupported()).resolves.toBe(true);
+    await expect(getCurrentLiveWallpaper()).resolves.toEqual({
+      packageName: 'com.example.app',
+      className: 'com.example.app.wallpaper.Service',
+      isOurs: true,
+    });
+  });
+
+  it('returns null for static wallpapers', async () => {
+    await expect(getCurrentLiveWallpaper()).resolves.toBeNull();
+  });
+
+  it('normalizes partial native live wallpaper info', async () => {
+    nativeGetCurrentLiveWallpaper.mockResolvedValueOnce({});
+
+    await expect(getCurrentLiveWallpaper()).resolves.toEqual({
+      packageName: '',
+      className: '',
+      isOurs: false,
+    });
+  });
+
+  it('opens the system picker', async () => {
+    await openLiveWallpaperPicker();
+
+    expect(nativeOpenLiveWallpaperPicker).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces picker failures', async () => {
+    nativeOpenLiveWallpaperPicker.mockRejectedValueOnce(
+      Object.assign(new Error('No picker'), { code: 'E_LIVE_WALLPAPER_UNAVAILABLE' })
+    );
+
+    await expect(openLiveWallpaperPicker()).rejects.toMatchObject({
+      code: 'E_LIVE_WALLPAPER_UNAVAILABLE',
+      message: 'No picker',
+    });
+  });
+
+  it('degrades safely on non-Android platforms', async () => {
+    setPlatform('ios');
+
+    await expect(isLiveWallpaperSupported()).resolves.toBe(false);
+    await expect(getCurrentLiveWallpaper()).resolves.toBeNull();
+    await expect(setLiveWallpaperImage({ uri: 'file:///a.jpg' })).rejects.toMatchObject({
+      code: 'E_UNSUPPORTED_PLATFORM',
+    });
+    await expect(clearLiveWallpaperImage()).rejects.toMatchObject({
+      code: 'E_UNSUPPORTED_PLATFORM',
+    });
+    await expect(openLiveWallpaperPicker()).rejects.toMatchObject({
+      code: 'E_UNSUPPORTED_PLATFORM',
+    });
+
+    expect(nativeSetLiveWallpaperImage).not.toHaveBeenCalled();
+    expect(nativeClearLiveWallpaperImage).not.toHaveBeenCalled();
+    expect(nativeOpenLiveWallpaperPicker).not.toHaveBeenCalled();
   });
 });

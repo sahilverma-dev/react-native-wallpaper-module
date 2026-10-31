@@ -1,13 +1,19 @@
 import { Platform } from 'react-native';
 
 import type {
+  LiveWallpaperInfo,
+  SetLiveWallpaperImageOptions,
   SetWallpaperOptions,
   SetWallpaperResult,
   WallpaperScreen,
 } from './Wallpaper.types';
 import { getWallpaperNativeModule, type WallpaperNativeModule } from './WallpaperNativeModule';
 import { WallpaperError, toWallpaperError } from './errors';
-import { normalizeScreen, normalizeSetWallpaperOptions } from './validation';
+import {
+  normalizeScreen,
+  normalizeSetLiveWallpaperImageOptions,
+  normalizeSetWallpaperOptions,
+} from './validation';
 
 const UNSUPPORTED_PLATFORM_MESSAGE =
   '@sahilverma-dev/wallpaper-module is only available on Android.';
@@ -123,6 +129,98 @@ export async function getWallpaperId(target: WallpaperScreen = 'home'): Promise<
     assertAndroid();
     const screen = normalizeScreen(target);
     return await native().getWallpaperId(screen);
+  } catch (error) {
+    throw toWallpaperError(error);
+  }
+}
+
+/**
+ * Sets the image used by the bundled live wallpaper.
+ *
+ * This does **not** activate the live wallpaper. Android requires the user to
+ * confirm it in the system picker; call {@link openLiveWallpaperPicker} after
+ * configuring the image.
+ *
+ * The image is copied into app storage, so the original file can be deleted
+ * afterwards. Limits: 50 MB compressed, 32 megapixels decoded.
+ */
+export async function setLiveWallpaperImage(
+  options: SetLiveWallpaperImageOptions
+): Promise<void> {
+  try {
+    assertAndroid();
+    const normalized = normalizeSetLiveWallpaperImageOptions(options);
+    await native().setLiveWallpaperImage(normalized.uri, normalized.motion);
+  } catch (error) {
+    throw toWallpaperError(error);
+  }
+}
+
+/**
+ * Removes the configured live wallpaper image. The bundled service falls back
+ * to an animated gradient. The live wallpaper itself stays active.
+ */
+export async function clearLiveWallpaperImage(): Promise<void> {
+  try {
+    assertAndroid();
+    await native().clearLiveWallpaperImage();
+  } catch (error) {
+    throw toWallpaperError(error);
+  }
+}
+
+/**
+ * Whether the device supports live wallpapers and exposes the bundled
+ * `WallpaperService`. Returns `false` on platforms other than Android.
+ */
+export async function isLiveWallpaperSupported(): Promise<boolean> {
+  if (!isAndroid()) {
+    return false;
+  }
+
+  try {
+    return (await native().isLiveWallpaperSupported()) === true;
+  } catch (error) {
+    throw toWallpaperError(error);
+  }
+}
+
+/**
+ * Returns the active live wallpaper, or `null` when a static wallpaper is in
+ * use (or the platform is not Android).
+ */
+export async function getCurrentLiveWallpaper(): Promise<LiveWallpaperInfo | null> {
+  if (!isAndroid()) {
+    return null;
+  }
+
+  try {
+    const info = await native().getCurrentLiveWallpaper();
+    if (!info) {
+      return null;
+    }
+
+    return {
+      packageName: typeof info.packageName === 'string' ? info.packageName : '',
+      className: typeof info.className === 'string' ? info.className : '',
+      isOurs: info.isOurs === true,
+    };
+  } catch (error) {
+    throw toWallpaperError(error);
+  }
+}
+
+/**
+ * Opens the system live wallpaper preview for the bundled service.
+ *
+ * Resolves as soon as the picker activity starts. Android provides no result
+ * for this flow, so the user may cancel; check {@link getCurrentLiveWallpaper}
+ * (for example on `AppState` becoming active) to see whether it was applied.
+ */
+export async function openLiveWallpaperPicker(): Promise<void> {
+  try {
+    assertAndroid();
+    await native().openLiveWallpaperPicker();
   } catch (error) {
     throw toWallpaperError(error);
   }

@@ -14,6 +14,8 @@ export const WALLPAPER_ERROR_CODES = [
   'E_DOWNLOAD_FAILED',
   /** The image is not a supported format (JPEG, PNG or WebP). */
   'E_UNSUPPORTED_FORMAT',
+  /** The image exceeds the size limits (50 MB or 32 megapixels for live wallpapers). */
+  'E_IMAGE_TOO_LARGE',
   /** Device policy or hardware does not allow changing the wallpaper. */
   'E_WALLPAPER_NOT_ALLOWED',
   /** Android failed to apply the wallpaper. */
@@ -24,6 +26,8 @@ export const WALLPAPER_ERROR_CODES = [
   'E_UNSUPPORTED_PLATFORM',
   /** An option passed from JavaScript is invalid. */
   'E_INVALID_ARGUMENT',
+  /** The device has no live wallpaper support or picker. */
+  'E_LIVE_WALLPAPER_UNAVAILABLE',
 ] as const;
 
 export type WallpaperErrorCode = (typeof WALLPAPER_ERROR_CODES)[number];

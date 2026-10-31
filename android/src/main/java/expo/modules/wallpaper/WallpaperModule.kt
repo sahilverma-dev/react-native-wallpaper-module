@@ -42,6 +42,35 @@ class WallpaperModule : Module() {
     AsyncFunction("getWallpaperId") { target: String ->
       wallpaperManager.getWallpaperId(WallpaperTarget.screenFromString(target))
     }
+
+    AsyncFunction("isLiveWallpaperSupported") {
+      LiveWallpaperSupport.isSupported(context)
+    }
+
+    AsyncFunction("getCurrentLiveWallpaper") {
+      LiveWallpaperSupport.current(context)
+    }
+
+    AsyncFunction("setLiveWallpaperImage") { uri: String, motion: String ->
+      LiveWallpaperConfigStore.saveImage(context, uri, normalizeMotion(motion))
+    }
+
+    AsyncFunction("clearLiveWallpaperImage") {
+      LiveWallpaperConfigStore.clearImage(context)
+    }
+
+    AsyncFunction("openLiveWallpaperPicker") {
+      LiveWallpaperSupport.openPicker(appContext)
+    }
+  }
+
+  private fun normalizeMotion(value: String): String = when (value.lowercase()) {
+    LiveWallpaperConfigStore.MOTION_PAN -> LiveWallpaperConfigStore.MOTION_PAN
+    LiveWallpaperConfigStore.MOTION_NONE -> LiveWallpaperConfigStore.MOTION_NONE
+    else -> throw WallpaperException(
+      WallpaperErrorCode.INVALID_ARGUMENT,
+      "Invalid motion \"$value\". Expected \"pan\" or \"none\"."
+    )
   }
 
   private fun applyWallpaper(

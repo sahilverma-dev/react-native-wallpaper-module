@@ -4,4 +4,24 @@
 
   <!-- Required only when a remote http(s) image is passed to setWallpaper(). -->
   <uses-permission android:name="android.permission.INTERNET" />
+
+  <application>
+    <!--
+      Bundled live wallpaper. Android requires the user to confirm a live
+      wallpaper through the system picker; apps cannot activate it silently.
+    -->
+    <service
+      android:name="expo.modules.wallpaper.ExpoLiveWallpaperService"
+      android:enabled="true"
+      android:exported="true"
+      android:label="@string/expo_wallpaper_live_label"
+      android:permission="android.permission.BIND_WALLPAPER">
+      <intent-filter>
+        <action android:name="android.service.wallpaper.WallpaperService" />
+      </intent-filter>
+      <meta-data
+        android:name="android.service.wallpaper"
+        android:resource="@xml/expo_wallpaper_live_info" />
+    </service>
+  </application>
 </manifest>

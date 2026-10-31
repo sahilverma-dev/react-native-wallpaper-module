@@ -64,3 +64,34 @@ export interface SetWallpaperResult {
    */
   wallpaperId: number;
 }
+
+/**
+ * Animation used by the bundled live wallpaper.
+ * - `'pan'` slowly zooms/pans the image (default).
+ * - `'none'` keeps the image static, which is easier on the battery.
+ */
+export type LiveWallpaperMotion = 'pan' | 'none';
+
+export interface SetLiveWallpaperImageOptions {
+  /**
+   * Image used by the bundled live wallpaper. Supports the same sources as
+   * `setWallpaper()`: `file://`, `content://`, `http(s)://` or an absolute path.
+   *
+   * The image is copied into the app's private storage, so the original file
+   * may be deleted afterwards.
+   */
+  uri: string;
+
+  /** Defaults to `'pan'`. */
+  motion?: LiveWallpaperMotion;
+}
+
+/** The live wallpaper currently active on the device. */
+export interface LiveWallpaperInfo {
+  /** Package that owns the active live wallpaper. */
+  packageName: string;
+  /** Service class implementing the active live wallpaper. */
+  className: string;
+  /** `true` when the active live wallpaper is the one bundled with this module. */
+  isOurs: boolean;
+}

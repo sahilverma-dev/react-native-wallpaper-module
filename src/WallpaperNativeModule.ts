@@ -1,6 +1,8 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
 import type {
+  LiveWallpaperInfo,
+  LiveWallpaperMotion,
   SetWallpaperResult,
   WallpaperCrop,
   WallpaperScreen,
@@ -24,6 +26,16 @@ export declare class WallpaperNativeModule extends NativeModule<Record<string, n
   isSetWallpaperAllowed(): Promise<boolean>;
 
   getWallpaperId(target: WallpaperScreen): Promise<number>;
+
+  isLiveWallpaperSupported(): Promise<boolean>;
+
+  getCurrentLiveWallpaper(): Promise<LiveWallpaperInfo | null>;
+
+  setLiveWallpaperImage(uri: string, motion: LiveWallpaperMotion): Promise<void>;
+
+  clearLiveWallpaperImage(): Promise<void>;
+
+  openLiveWallpaperPicker(): Promise<void>;
 }
 
 let nativeModule: WallpaperNativeModule | undefined;

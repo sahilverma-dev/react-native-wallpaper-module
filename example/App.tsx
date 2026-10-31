@@ -1,3 +1,18 @@
+import {
+  clearLiveWallpaperImage,
+  getCurrentLiveWallpaper,
+  getWallpaperId,
+  isLiveWallpaperSupported,
+  isSetWallpaperAllowed,
+  isWallpaperError,
+  isWallpaperSupported,
+  openLiveWallpaperPicker,
+  setLiveWallpaperImage,
+  setWallpaper,
+  type LiveWallpaperInfo,
+  type LiveWallpaperMotion,
+  type WallpaperTarget,
+} from '@sahilverma-dev/wallpaper-module';
 import { Asset } from 'expo-asset';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useState } from 'react';
@@ -11,14 +26,6 @@ import {
   View,
 } from 'react-native';
 
-import {
-  getWallpaperId,
-  isSetWallpaperAllowed,
-  isWallpaperError,
-  isWallpaperSupported,
-  setWallpaper,
-  type WallpaperTarget,
-} from '@sahilverma-dev/wallpaper-module';
 
 const REMOTE_IMAGE = 'https://picsum.photos/1080/1920';
 const SAMPLE_IMAGE = require('./assets/wallpaper.png');
@@ -39,22 +46,31 @@ const EMPTY_CAPABILITIES: Capabilities = {
 
 export default function App() {
   const [capabilities, setCapabilities] = useState<Capabilities>(EMPTY_CAPABILITIES);
+  const [liveSupported, setLiveSupported] = useState<boolean | null>(null);
+  const [liveInfo, setLiveInfo] = useState<LiveWallpaperInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState('Ready. Apply a sample wallpaper to get started.');
 
   const refreshCapabilities = useCallback(async () => {
-    const [supported, allowed] = await Promise.all([
+    const [supported, allowed, live] = await Promise.all([
       isWallpaperSupported(),
       isSetWallpaperAllowed(),
+      isLiveWallpaperSupported(),
     ]);
-    const [homeId, lockId] = await Promise.all([
+    const [homeId, lockId, currentLive] = await Promise.all([
       getWallpaperId('home').catch(() => null),
       getWallpaperId('lock').catch(() => null),
+      getCurrentLiveWallpaper().catch(() => null),
     ]);
     setCapabilities({ supported, allowed, homeId, lockId });
+    setLiveSupported(live);
+    setLiveInfo(currentLive);
   }, []);
 
   useEffect(() => {
+    // State updates happen after awaited native calls, not synchronously; the
+    // rule cannot see through the async boundary.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshCapabilities().catch((error) => setLog(describeError(error)));
   }, [refreshCapabilities]);
 
@@ -77,14 +93,18 @@ export default function App() {
     [refreshCapabilities]
   );
 
+  const getSampleUri = useCallback(async () => {
+    const asset = Asset.fromModule(SAMPLE_IMAGE);
+    await asset.downloadAsync();
+    return asset.localUri ?? asset.uri;
+  }, []);
+
   const applySample = useCallback(
     async (target: WallpaperTarget) => {
       setBusy(true);
       setLog('Preparing the bundled sample image…');
       try {
-        const asset = Asset.fromModule(SAMPLE_IMAGE);
-        await asset.downloadAsync();
-        const uri = asset.localUri ?? asset.uri;
+        const uri = await getSampleUri();
         setBusy(false);
         await apply(uri, target, 'sample image');
       } catch (error) {
@@ -92,8 +112,50 @@ export default function App() {
         setLog(`✗ Could not load the sample image.\n${describeError(error)}`);
       }
     },
-    [apply]
+    [apply, getSampleUri]
   );
+
+  const configureLiveWallpaper = useCallback(
+    async (motion: LiveWallpaperMotion) => {
+      setBusy(true);
+      setLog(`Saving the sample as the live wallpaper image (${motion})…`);
+      try {
+        const uri = await getSampleUri();
+        await setLiveWallpaperImage({ uri, motion });
+        setLog('✓ Live wallpaper image saved. Open the picker to confirm it.');
+        await refreshCapabilities();
+      } catch (error) {
+        setLog(`✗ Could not configure the live wallpaper.\n${describeError(error)}`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [getSampleUri, refreshCapabilities]
+  );
+
+  const openLivePicker = useCallback(async () => {
+    setBusy(true);
+    try {
+      await openLiveWallpaperPicker();
+      setLog('System live wallpaper preview opened. Confirm there, then press Refresh.');
+    } catch (error) {
+      setLog(`✗ Could not open the live wallpaper picker.\n${describeError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const clearLiveImage = useCallback(async () => {
+    setBusy(true);
+    try {
+      await clearLiveWallpaperImage();
+      setLog('✓ Live wallpaper image cleared. The service falls back to a gradient.');
+    } catch (error) {
+      setLog(`✗ Could not clear the live wallpaper image.\n${describeError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   const pickFromGallery = useCallback(
     async (target: WallpaperTarget) => {
@@ -165,6 +227,49 @@ export default function App() {
             onPress={() => apply(REMOTE_IMAGE, 'home', 'remote image')}
             style={[styles.secondaryButton, busy && styles.disabled]}>
             <Text style={styles.secondaryButtonText}>Download https://picsum.photos → Home</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Live wallpaper</Text>
+          <Text style={styles.cardHint}>
+            Android requires confirmation in the system picker; apps cannot switch live wallpapers
+            silently.
+          </Text>
+          <Row label="Live wallpapers" value={formatFlag(liveSupported)} />
+          <Row
+            label="Active"
+            value={liveInfo ? (liveInfo.isOurs ? 'This module' : liveInfo.packageName) : 'None (static)'}
+          />
+          <View style={styles.buttonRow}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => configureLiveWallpaper('pan')}
+              style={[styles.primaryButton, busy && styles.disabled]}>
+              <Text style={styles.primaryButtonText}>Sample · pan</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => configureLiveWallpaper('none')}
+              style={[styles.primaryButton, busy && styles.disabled]}>
+              <Text style={styles.primaryButtonText}>Sample · static</Text>
+            </Pressable>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={openLivePicker}
+            style={[styles.secondaryButton, busy && styles.disabled]}>
+            <Text style={styles.secondaryButtonText}>Open system picker</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={clearLiveImage}
+            style={[styles.secondaryButton, busy && styles.disabled]}>
+            <Text style={styles.secondaryButtonText}>Clear image (gradient)</Text>
           </Pressable>
         </View>
 
@@ -299,6 +404,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
+    flexShrink: 1,
+    textAlign: 'right',
   },
   buttonRow: {
     flexDirection: 'row',

@@ -1,7 +1,9 @@
 import {
   normalizeAllowBackup,
   normalizeCrop,
+  normalizeMotion,
   normalizeScreen,
+  normalizeSetLiveWallpaperImageOptions,
   normalizeSetWallpaperOptions,
   normalizeTarget,
   normalizeUri,
@@ -136,5 +138,49 @@ describe('normalizeSetWallpaperOptions', () => {
   it('rejects non-object options', () => {
     expect(() => normalizeSetWallpaperOptions(null as never)).toThrow(/expects an object/);
     expect(() => normalizeSetWallpaperOptions([] as never)).toThrow(/expects an object/);
+  });
+});
+
+describe('normalizeMotion', () => {
+  it('defaults to pan', () => {
+    expect(normalizeMotion(undefined)).toBe('pan');
+    expect(normalizeMotion(null)).toBe('pan');
+  });
+
+  it.each(['pan', 'none'])('accepts %s', (motion) => {
+    expect(normalizeMotion(motion)).toBe(motion);
+  });
+
+  it.each(['spin', '', 1, true, {}])('rejects %j', (motion) => {
+    expect(() => normalizeMotion(motion)).toThrow(/motion/);
+  });
+});
+
+describe('normalizeSetLiveWallpaperImageOptions', () => {
+  it('applies defaults', () => {
+    expect(normalizeSetLiveWallpaperImageOptions({ uri: 'file:///a.jpg' })).toEqual({
+      uri: 'file:///a.jpg',
+      motion: 'pan',
+    });
+  });
+
+  it('keeps explicit values', () => {
+    expect(
+      normalizeSetLiveWallpaperImageOptions({ uri: 'https://example.com/a.png', motion: 'none' })
+    ).toEqual({
+      uri: 'https://example.com/a.png',
+      motion: 'none',
+    });
+  });
+
+  it('validates the URI with the same rules as setWallpaper', () => {
+    expect(() => normalizeSetLiveWallpaperImageOptions({ uri: 'nope' })).toThrow(/Invalid image URI/);
+  });
+
+  it('rejects non-object options', () => {
+    expect(() => normalizeSetLiveWallpaperImageOptions(null as never)).toThrow(
+      /expects an object/
+    );
+    expect(() => normalizeSetLiveWallpaperImageOptions([] as never)).toThrow(/expects an object/);
   });
 });
