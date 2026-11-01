@@ -1,8 +1,8 @@
 # @sahilverma-dev/wallpaper-module
 
-Apply images as Android **home screen**, **lock screen** or **both** wallpapers from React Native and Expo.
+Apply **static wallpapers** and **video live wallpapers** to the Android home screen, lock screen or both — from React Native and Expo.
 
-Built with Kotlin + the Expo Modules API, so a single implementation works in Expo development builds, EAS builds and bare React Native CLI apps (with Expo Modules installed).
+Built with Kotlin + the Expo Modules API and Media3 ExoPlayer, so a single implementation works in Expo development builds, EAS builds and bare React Native CLI apps (with Expo Modules installed).
 
 | Platform | Support |
 | --- | --- |
@@ -20,6 +20,7 @@ Built with Kotlin + the Expo Modules API, so a single implementation works in Ex
 - Optional crop rectangle; clear back to the system default.
 - Bundled live wallpaper service: configurable image with slow pan/zoom, or a looping video via Media3 ExoPlayer.
 - Video `fill` / `fit` / `crop` scaling, mute, loop and playback speed.
+- Local or remote video sources, streamed natively into app storage.
 - Gradient fallback when no media is configured or playback fails.
 - Namespaced `Wallpaper` API plus flat named exports.
 - Device capability detection and wallpaper info snapshot.
@@ -76,6 +77,8 @@ Then rebuild the native app. Autolinking picks the module up from `expo-module.c
 - Expo SDK 54+ (tested on SDK 58, React Native 0.88).
 - Android 7.0 (API 24) or newer.
 - A development or production build — not Expo Go.
+- Media3 ExoPlayer is bundled for video live wallpapers; it adds native code
+  and APK size but requires no extra install step in the consuming app.
 
 ---
 
@@ -259,9 +262,31 @@ await Wallpaper.live.setVideo({
 await Wallpaper.live.applyVideo({ uri: videoUri, scaling: 'crop' });
 ```
 
+### Remote videos
+
+```ts
+await Wallpaper.live.applyVideo({
+  uri: 'https://cdn.example.com/wallpapers/aurora.mp4',
+  loop: true,
+  muted: true,
+  scaling: 'crop',
+});
+```
+
+Remote videos are downloaded natively and validated before being stored in app
+private storage (200 MB cap). HTTP failures map to `E_DOWNLOAD_FAILED`, missing
+resources to `E_IMAGE_NOT_FOUND`, and non-video containers to
+`E_UNSUPPORTED_FORMAT`. Download progress is not reported; the promise resolves
+after the file is saved and the picker opens.
+
+A 4.6 MB remote MP4 has been verified end to end on a Moto G62 5G (Android 13):
+download, validation, picker preview and applied live wallpaper all worked.
+
 - **Scaling:** `crop` fills the screen and crops overflow (default), `fit`
   letterboxes the whole frame, `fill` stretches. Implemented with Media3's
-  effects pipeline, not by stretching the raw surface.
+  effects pipeline, not by stretching the raw surface. `crop` is verified on
+  hardware; `fit`/`fill` use the same pipeline and are covered by the manual
+  matrix.
 - **Lifecycle:** playback pauses when the wallpaper is not visible and resumes
   when it returns. The player is released when the service is destroyed.
 - **Failures:** invalid files are rejected before activation; playback errors,
@@ -381,6 +406,9 @@ or `'lock'`. Single-screen clearing requires Android 9+; older devices throw
 
 Resolves to conservative `false`/`0` values on non-Android platforms.
 
+`videoLiveWallpapers` means live wallpapers are supported **and** the device
+exposes a video decoder; it does not guarantee every codec/container decodes.
+
 ### `getWallpaperInfo(): Promise<WallpaperInfoSummary>`
 
 ```ts
@@ -409,6 +437,11 @@ Android). Otherwise:
   isOurs: boolean; // true when it is this module's service
 }
 ```
+
+Android 14+ is queried with `getWallpaperInfo(FLAG_SYSTEM)`. Some OEM Android 13
+builds return `null` even while a live wallpaper is active; in that case the
+module recognises its own service from the running wallpaper engine. A
+third-party live wallpaper may be reported as `null` on those builds.
 
 ### `openLiveWallpaperPicker(): Promise<void>`
 
@@ -508,7 +541,7 @@ Media3 ExoPlayer is bundled; no extra dependency is required in the consuming ap
 | --- | --- |
 | `file://` | `FileInputStream` |
 | `content://` | `ContentResolver.openInputStream` |
-| `http(s)://` | `HttpURLConnection`, streamed directly into `WallpaperManager` |
+| `http(s)://` | `HttpURLConnection`; static wallpapers stream into `WallpaperManager`, live images/videos copy into app storage |
 
 Files are closed and HTTP connections are disconnected after the operation, including on failure. Network I/O runs on the Expo modules background queue, never the UI thread.
 
@@ -557,8 +590,17 @@ npx expo run:android
 ```
 
 The example applies a bundled 1080×1920 PNG, a gallery image, and a remote image.
-It also configures the bundled live wallpaper (image and a bundled 4-second MP4)
-and opens the system picker.
+It also configures the bundled live wallpaper (image and a bundled 4-second MP4),
+and applies a remote Pixabay MP4 through the system picker.
+
+### Hardware verification
+
+| Device | Android | Verified |
+| --- | --- | --- |
+| Moto G62 5G | 13 (API 33) | Static home/lock; image live wallpaper; remote 4.6 MB MP4 live wallpaper (download → preview → applied); runtime live-wallpaper detection fallback |
+
+Emulator runs additionally covered Expo prebuild + `assembleDebug`. Lock-screen
+behavior and OEM restrictions still need per-device testing.
 
 ### Manual Android test matrix
 
@@ -583,6 +625,9 @@ and opens the system picker.
 | Video picker confirmed | Home/lock chooser applies the video |
 | Video scaling `'fit'` | Whole frame visible with letterboxing |
 | Video scaling `'crop'` | Full-screen, overflow cropped |
+| Remote HTTPS video (≈5 MB) | Downloads, previews and applies |
+| Remote video over 200 MB | `E_IMAGE_TOO_LARGE` |
+| OEM `getWallpaperInfo()` returns null | Running engine fallback reports `isOurs: true` |
 | Video deleted while active | Gradient fallback, no crash |
 | 250 MB video | `E_IMAGE_TOO_LARGE` |
 | Audio-only file renamed `.mp4` | `E_UNSUPPORTED_FORMAT` |
@@ -598,6 +643,7 @@ Test on at least one physical device; emulator behavior for lock screens is not 
 - `0.1.0` — Android implementation, URI handling, typed errors, Expo + CLI support.
 - `0.2.0` — Image live wallpaper service and picker flow.
 - `0.3.0` — Video live wallpapers, namespaced API, capability detection.
+- `0.4.0` — Wallpaper colors, image processing, media pickers, live wallpaper events (planned).
 - `1.0.0` — Stable public API.
 
 Out of scope: iOS wallpapers, scheduling/rotation, gallery UI, custom per-frame
