@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.service.wallpaper.WallpaperService
 import expo.modules.kotlin.AppContext
 
@@ -45,13 +46,23 @@ internal object LiveWallpaperSupport {
    */
   @Suppress("DEPRECATION")
   fun current(context: Context): Map<String, Any>? {
+    val manager = WallpaperManager.getInstance(context)
+
     val info = try {
-      WallpaperManager.getInstance(context).getWallpaperInfo()
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        manager.getWallpaperInfo(WallpaperManager.FLAG_SYSTEM)
+      } else {
+        manager.getWallpaperInfo()
+      }
     } catch (_: Exception) {
       null
-    } ?: return null
+    }
 
-    val component = info.component ?: return null
+    if (info == null) {
+      return fallbackToRunningService(context)
+    }
+
+    val component = info.component ?: return fallbackToRunningService(context)
     val isOurs =
       component.packageName == context.packageName &&
         component.className == ExpoLiveWallpaperService::class.java.name
@@ -60,6 +71,23 @@ internal object LiveWallpaperSupport {
       "packageName" to component.packageName,
       "className" to component.className,
       "isOurs" to isOurs
+    )
+  }
+
+  /**
+   * Some OEM Android 7–13 builds return null from `getWallpaperInfo()` even
+   * while a live wallpaper is active. If our own engine is running (outside the
+   * system preview), we can still report it accurately.
+   */
+  private fun fallbackToRunningService(context: Context): Map<String, Any>? {
+    if (!LiveWallpaperRuntime.hasActiveEngine()) {
+      return null
+    }
+
+    return mapOf(
+      "packageName" to context.packageName,
+      "className" to ExpoLiveWallpaperService::class.java.name,
+      "isOurs" to true
     )
   }
 

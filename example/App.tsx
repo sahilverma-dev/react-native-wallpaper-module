@@ -32,6 +32,8 @@ import {
 } from 'react-native';
 
 const REMOTE_IMAGE = 'https://picsum.photos/1080/1920';
+const REMOTE_VIDEO =
+  'https://cdn.pixabay.com/video/2023/02/28/152622-803732492_large.mp4';
 const SAMPLE_VIDEO = require('./assets/test-video.mp4');
 const SAMPLE_IMAGE = require('./assets/wallpaper.png');
 
@@ -218,6 +220,29 @@ export default function App() {
     }
   }, [getSampleVideoUri, refreshCapabilities]);
 
+  const applyRemoteVideo = useCallback(async () => {
+    setBusy(true);
+    setLog('Downloading the Pixabay video and opening the picker…');
+    try {
+      const result = await applyLiveWallpaperVideo({
+        uri: REMOTE_VIDEO,
+        loop: true,
+        muted: true,
+        scaling: 'crop',
+      });
+      setLog(
+        `Remote video configured. Confirm in the system picker.\nrequiresConfirmation: ${String(
+          result.requiresConfirmation
+        )}`
+      );
+      await refreshCapabilities();
+    } catch (error) {
+      setLog(`✗ Could not apply the remote video.\n${describeError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [refreshCapabilities]);
+
   const pickFromGallery = useCallback(
     async (target: WallpaperTarget) => {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -370,6 +395,13 @@ export default function App() {
             onPress={applyVideo}
             style={[styles.secondaryButton, busy && styles.disabled]}>
             <Text style={styles.secondaryButtonText}>Apply video (opens picker)</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={applyRemoteVideo}
+            style={[styles.secondaryButton, busy && styles.disabled]}>
+            <Text style={styles.secondaryButtonText}>Apply Pixabay URL (opens picker)</Text>
           </Pressable>
         </View>
 

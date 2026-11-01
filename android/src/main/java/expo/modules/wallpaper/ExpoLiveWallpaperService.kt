@@ -14,7 +14,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.service.wallpaper.WallpaperService
-import android.view.Surface
 import android.view.SurfaceHolder
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -81,7 +80,9 @@ class ExpoLiveWallpaperService : WallpaperService() {
     private var offsetX = 0f
 
     private var player: ExoPlayer? = null
-    private var videoSurface: Surface? = null
+    private var videoHolder: SurfaceHolder? = null
+    private var previewEngine = false
+    private var runtimeRegistered = false
     private var videoMediaKey: String? = null
     private var videoEffectsKey: String? = null
     private var videoActive = false
@@ -106,6 +107,9 @@ class ExpoLiveWallpaperService : WallpaperService() {
       super.onCreate(holder)
       setOffsetNotificationsEnabled(true)
       LiveWallpaperConfigStore.addListener(configListener)
+      previewEngine = isPreview
+      LiveWallpaperRuntime.onEngineCreated(previewEngine)
+      runtimeRegistered = true
       startedAt = SystemClock.elapsedRealtime()
       reloadConfig(force = true)
     }
@@ -114,6 +118,10 @@ class ExpoLiveWallpaperService : WallpaperService() {
       destroyed = true
       handler.removeCallbacksAndMessages(null)
       LiveWallpaperConfigStore.removeListener(configListener)
+      if (runtimeRegistered) {
+        LiveWallpaperRuntime.onEngineDestroyed(previewEngine)
+        runtimeRegistered = false
+      }
       releasePlayer()
       recycleBitmap()
       loader.shutdownNow()
@@ -143,18 +151,19 @@ class ExpoLiveWallpaperService : WallpaperService() {
 
     override fun onSurfaceCreated(holder: SurfaceHolder) {
       super.onSurfaceCreated(holder)
-      videoSurface = holder.surface
+      videoHolder = holder
 
-      if (videoActive) {
-        player?.setVideoSurface(videoSurface)
-      } else {
+      if (!videoActive) {
         drawFrame()
         scheduleNextFrame()
       }
+      // The holder is attached in onSurfaceChanged, once its size (needed by
+      // the effects pipeline) is known.
     }
 
     override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
       super.onSurfaceChanged(holder, format, width, height)
+      videoHolder = holder
 
       if (width != surfaceWidth || height != surfaceHeight) {
         surfaceWidth = width
@@ -166,7 +175,7 @@ class ExpoLiveWallpaperService : WallpaperService() {
       }
 
       if (videoActive) {
-        updateVideoEffects()
+        attachVideoSurface()
       } else {
         drawFrame()
         scheduleNextFrame()
@@ -175,8 +184,8 @@ class ExpoLiveWallpaperService : WallpaperService() {
 
     override fun onSurfaceDestroyed(holder: SurfaceHolder) {
       super.onSurfaceDestroyed(holder)
-      player?.clearVideoSurface()
-      videoSurface = null
+      player?.clearVideoSurfaceHolder(holder)
+      videoHolder = null
       handler.removeCallbacks(frameRunnable)
       frameScheduled = false
     }
@@ -260,6 +269,7 @@ class ExpoLiveWallpaperService : WallpaperService() {
       exoPlayer.volume = if (config.muted) 0f else 1f
       exoPlayer.setPlaybackSpeed(config.speed)
       updateVideoEffects()
+      attachVideoSurface()
 
       if (visible) {
         exoPlayer.play()
@@ -287,9 +297,25 @@ class ExpoLiveWallpaperService : WallpaperService() {
         }
       )
 
-      videoSurface?.let { exoPlayer.setVideoSurface(it) }
       player = exoPlayer
       return exoPlayer
+    }
+
+    /**
+     * Effects must be configured before the output surface is attached; the
+     * Media3 effects pipeline otherwise drops every frame with
+     * "Output surface and size not set".
+     */
+    private fun attachVideoSurface() {
+      val exoPlayer = player ?: return
+      val holder = videoHolder ?: return
+      if (surfaceWidth <= 0 || surfaceHeight <= 0) {
+        return
+      }
+      updateVideoEffects()
+      // The holder API reports its surface size to the player; a raw Surface
+      // leaves the effects pipeline without an output resolution.
+      exoPlayer.setVideoSurfaceHolder(holder)
     }
 
     private fun updateVideoEffects() {
@@ -339,7 +365,7 @@ class ExpoLiveWallpaperService : WallpaperService() {
 
       if (current != null) {
         runCatching {
-          current.clearVideoSurface()
+          current.clearVideoSurfaceHolder(videoHolder)
           current.stop()
           current.release()
         }

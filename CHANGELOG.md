@@ -20,6 +20,12 @@
 - `clearLiveWallpaperImage()` is now an alias for clearing all configured media.
 - Image and video URIs share one streaming resolver with a 200 MB video cap.
 
+### Fixed
+
+- Video previews were black because Media3's effects pipeline received a raw `Surface` without an output size. The engine now uses `setVideoSurfaceHolder`, which reports the surface size and the effects chain (fill/fit/crop) renders correctly.
+- On OEM Android 13 builds where `WallpaperManager.getWallpaperInfo()` returns `null`, the active live wallpaper is now detected from the running service engine; `getWallpaperInfo(FLAG_SYSTEM)` is used on Android 14+.
+- Video is attached to the surface only after effects and dimensions are known, preventing dropped frames.
+
 ### Safety
 
 - Video decode/playback errors, missing files and unsupported devices fall back to the gradient.

@@ -227,6 +227,10 @@ app is in the background; animation pauses whenever the wallpaper is not visible
 - **Device support:** some Android Go / heavily customized ROMs do not expose
   live wallpapers. `isLiveWallpaperSupported()` returns `false` and the picker
   throws `E_LIVE_WALLPAPER_UNAVAILABLE`.
+- **Detection quirks:** some OEM Android 7–13 builds return `null` from
+  `getWallpaperInfo()` even while a live wallpaper is active. The module falls
+  back to its own running engine and reports `isOurs: true`; a third-party live
+  wallpaper may be reported as static on those builds.
 - **Lock screen:** whether a live wallpaper also covers the lock screen is
   controlled by the OS and varies by version/OEM.
 - **Uninstalling the app** removes the service; Android reverts to the default
