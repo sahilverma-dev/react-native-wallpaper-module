@@ -4,15 +4,20 @@ plugins {
 }
 
 group = 'expo.modules.wallpaper'
-version = '0.2.0'
+version = '0.3.0'
 
 android {
   namespace "expo.modules.wallpaper"
   defaultConfig {
     versionCode 1
-    versionName "0.2.0"
+    versionName "0.3.0"
   }
   lintOptions {
     abortOnError false
   }
+}
+
+dependencies {
+  implementation "androidx.media3:media3-exoplayer:1.11.1"
+  implementation "androidx.media3:media3-effect:1.11.1"
 }

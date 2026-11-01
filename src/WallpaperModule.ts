@@ -1,17 +1,24 @@
 import { Platform } from 'react-native';
 
 import type {
+  LiveWallpaperApplyResult,
   LiveWallpaperInfo,
   SetLiveWallpaperImageOptions,
+  SetLiveWallpaperVideoOptions,
   SetWallpaperOptions,
   SetWallpaperResult,
+  WallpaperCapabilities,
+  WallpaperInfoSummary,
   WallpaperScreen,
+  WallpaperTarget,
 } from './Wallpaper.types';
 import { getWallpaperNativeModule, type WallpaperNativeModule } from './WallpaperNativeModule';
 import { WallpaperError, toWallpaperError } from './errors';
 import {
+  normalizeClearTarget,
   normalizeScreen,
   normalizeSetLiveWallpaperImageOptions,
+  normalizeSetLiveWallpaperVideoOptions,
   normalizeSetWallpaperOptions,
 } from './validation';
 
@@ -224,4 +231,137 @@ export async function openLiveWallpaperPicker(): Promise<void> {
   } catch (error) {
     throw toWallpaperError(error);
   }
+}
+
+/**
+ * Configures the bundled live wallpaper to play a video.
+ *
+ * This does **not** activate the live wallpaper. Android requires the user to
+ * confirm it in the system picker; use {@link applyLiveWallpaperVideo} to
+ * configure and open the picker in one call.
+ */
+export async function setLiveWallpaperVideo(
+  options: SetLiveWallpaperVideoOptions
+): Promise<void> {
+  try {
+    assertAndroid();
+    const normalized = normalizeSetLiveWallpaperVideoOptions(options);
+    await native().setLiveWallpaperVideo(
+      normalized.uri,
+      normalized.loop,
+      normalized.muted,
+      normalized.speed,
+      normalized.scaling
+    );
+  } catch (error) {
+    throw toWallpaperError(error);
+  }
+}
+
+/** Removes any configured live wallpaper media (image or video). */
+export async function clearLiveWallpaper(): Promise<void> {
+  try {
+    assertAndroid();
+    await native().clearLiveWallpaper();
+  } catch (error) {
+    throw toWallpaperError(error);
+  }
+}
+
+/**
+ * Clears the static wallpaper, restoring the system default.
+ *
+ * Defaults to `'both'`. Clearing only one screen requires Android 9+; older
+ * devices throw `E_UNSUPPORTED_API_LEVEL` when asked for a single screen.
+ */
+export async function clearWallpaper(target: WallpaperTarget = 'both'): Promise<void> {
+  try {
+    assertAndroid();
+    const normalized = normalizeClearTarget(target);
+    await native().clearWallpaper(normalized);
+  } catch (error) {
+    throw toWallpaperError(error);
+  }
+}
+
+function capabilityNumber(value: unknown, fallback: number): number {
+  const numeric = typeof value === 'string' ? Number(value) : value;
+  return typeof numeric === 'number' && Number.isFinite(numeric) ? numeric : fallback;
+}
+
+/**
+ * Returns a device capability snapshot used to gate UI.
+ * Resolves to a conservative snapshot on non-Android platforms.
+ */
+export async function getWallpaperCapabilities(): Promise<WallpaperCapabilities> {
+  if (!isAndroid()) {
+    return {
+      apiLevel: 0,
+      staticWallpapers: false,
+      wallpaperSettingAllowed: false,
+      liveWallpapers: false,
+      liveWallpaperPicker: false,
+      videoLiveWallpapers: false,
+      lockScreenWallpapers: false,
+      maxImageBytes: 0,
+      maxImagePixels: 0,
+      maxVideoBytes: 0,
+      minVideoSpeed: 0.25,
+      maxVideoSpeed: 3,
+    };
+  }
+
+  try {
+    const raw = await native().getWallpaperCapabilities();
+    return {
+      apiLevel: capabilityNumber(raw?.apiLevel, 0),
+      staticWallpapers: raw?.staticWallpapers === true,
+      wallpaperSettingAllowed: raw?.wallpaperSettingAllowed === true,
+      liveWallpapers: raw?.liveWallpapers === true,
+      liveWallpaperPicker: raw?.liveWallpaperPicker === true,
+      videoLiveWallpapers: raw?.videoLiveWallpapers === true,
+      lockScreenWallpapers: raw?.lockScreenWallpapers === true,
+      maxImageBytes: capabilityNumber(raw?.maxImageBytes, 0),
+      maxImagePixels: capabilityNumber(raw?.maxImagePixels, 0),
+      maxVideoBytes: capabilityNumber(raw?.maxVideoBytes, 0),
+      minVideoSpeed: capabilityNumber(raw?.minVideoSpeed, 0.25),
+      maxVideoSpeed: capabilityNumber(raw?.maxVideoSpeed, 3),
+    };
+  } catch (error) {
+    throw toWallpaperError(error);
+  }
+}
+
+/** Configures an image, then opens the system picker for confirmation. */
+export async function applyLiveWallpaperImage(
+  options: SetLiveWallpaperImageOptions
+): Promise<LiveWallpaperApplyResult> {
+  await setLiveWallpaperImage(options);
+  await openLiveWallpaperPicker();
+  return { requiresConfirmation: true };
+}
+
+/** Configures a video, then opens the system picker for confirmation. */
+export async function applyLiveWallpaperVideo(
+  options: SetLiveWallpaperVideoOptions
+): Promise<LiveWallpaperApplyResult> {
+  await setLiveWallpaperVideo(options);
+  await openLiveWallpaperPicker();
+  return { requiresConfirmation: true };
+}
+
+/** One-shot snapshot of wallpaper ids, type and active live wallpaper. */
+export async function getWallpaperInfo(): Promise<WallpaperInfoSummary> {
+  const [homeId, lockId, live] = await Promise.all([
+    getWallpaperId('home').catch(() => -1),
+    getWallpaperId('lock').catch(() => -1),
+    getCurrentLiveWallpaper().catch(() => null),
+  ]);
+
+  return {
+    homeId,
+    lockId,
+    live,
+    type: live ? 'live' : 'static',
+  };
 }

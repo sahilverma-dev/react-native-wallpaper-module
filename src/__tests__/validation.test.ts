@@ -1,10 +1,16 @@
 import {
   normalizeAllowBackup,
+  normalizeClearTarget,
   normalizeCrop,
+  normalizeLoop,
   normalizeMotion,
+  normalizeMuted,
+  normalizeScaling,
   normalizeScreen,
   normalizeSetLiveWallpaperImageOptions,
+  normalizeSetLiveWallpaperVideoOptions,
   normalizeSetWallpaperOptions,
+  normalizeSpeed,
   normalizeTarget,
   normalizeUri,
 } from '../validation';
@@ -182,5 +188,88 @@ describe('normalizeSetLiveWallpaperImageOptions', () => {
       /expects an object/
     );
     expect(() => normalizeSetLiveWallpaperImageOptions([] as never)).toThrow(/expects an object/);
+  });
+});
+
+describe('video option normalizers', () => {
+  it('applies defaults', () => {
+    expect(normalizeLoop(undefined)).toBe(true);
+    expect(normalizeMuted(undefined)).toBe(true);
+    expect(normalizeSpeed(undefined)).toBe(1);
+    expect(normalizeScaling(undefined)).toBe('crop');
+  });
+
+  it('accepts boundary speeds', () => {
+    expect(normalizeSpeed(0.25)).toBe(0.25);
+    expect(normalizeSpeed(3)).toBe(3);
+  });
+
+  it.each(['yes', 1, {}])('rejects loop=%j', (value) => {
+    expect(() => normalizeLoop(value)).toThrow(/boolean/);
+  });
+
+  it.each(['no', 0, {}])('rejects muted=%j', (value) => {
+    expect(() => normalizeMuted(value)).toThrow(/boolean/);
+  });
+
+  it.each([0.24, 3.01, Number.NaN, Infinity, '1'])('rejects speed=%j', (value) => {
+    expect(() => normalizeSpeed(value)).toThrow(/speed/);
+  });
+
+  it.each(['fill', 'fit', 'crop'])('accepts scaling=%s', (value) => {
+    expect(normalizeScaling(value)).toBe(value);
+  });
+
+  it.each(['cover', '', 1])('rejects scaling=%j', (value) => {
+    expect(() => normalizeScaling(value)).toThrow(/scaling/);
+  });
+
+  it('normalizes clear targets', () => {
+    expect(normalizeClearTarget(undefined)).toBe('both');
+    expect(normalizeClearTarget('home')).toBe('home');
+    expect(normalizeClearTarget('lock')).toBe('lock');
+    expect(() => normalizeClearTarget('desktop')).toThrow(/Invalid wallpaper target/);
+  });
+});
+
+describe('normalizeSetLiveWallpaperVideoOptions', () => {
+  it('applies all defaults', () => {
+    expect(normalizeSetLiveWallpaperVideoOptions({ uri: 'file:///a.mp4' })).toEqual({
+      uri: 'file:///a.mp4',
+      loop: true,
+      muted: true,
+      speed: 1,
+      scaling: 'crop',
+    });
+  });
+
+  it('keeps explicit values', () => {
+    expect(
+      normalizeSetLiveWallpaperVideoOptions({
+        uri: 'https://example.com/a.mp4',
+        loop: false,
+        muted: false,
+        speed: 2,
+        scaling: 'fill',
+      })
+    ).toEqual({
+      uri: 'https://example.com/a.mp4',
+      loop: false,
+      muted: false,
+      speed: 2,
+      scaling: 'fill',
+    });
+  });
+
+  it('validates the URI', () => {
+    expect(() => normalizeSetLiveWallpaperVideoOptions({ uri: 'video.mp4' })).toThrow(
+      /Invalid image URI/
+    );
+  });
+
+  it('rejects non-object options', () => {
+    expect(() => normalizeSetLiveWallpaperVideoOptions(null as never)).toThrow(
+      /expects an object/
+    );
   });
 });

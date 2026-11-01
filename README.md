@@ -15,12 +15,16 @@ Built with Kotlin + the Expo Modules API, so a single implementation works in Ex
 
 ## Features
 
-- Set home, lock or both wallpapers.
+- Set home, lock or both static wallpapers.
 - Local `file://` URIs, Android `content://` URIs, and remote `http(s)://` URLs.
-- Optional crop rectangle.
-- Bundled live wallpaper service with configurable image, slow pan/zoom, and gradient fallback.
+- Optional crop rectangle; clear back to the system default.
+- Bundled live wallpaper service: configurable image with slow pan/zoom, or a looping video via Media3 ExoPlayer.
+- Video `fill` / `fit` / `crop` scaling, mute, loop and playback speed.
+- Gradient fallback when no media is configured or playback fails.
+- Namespaced `Wallpaper` API plus flat named exports.
+- Device capability detection and wallpaper info snapshot.
 - Typed TypeScript API with stable error codes.
-- Streams images natively — no base64, no full-size copies in JS memory.
+- Streams media natively — no base64, no full-size copies in JS memory.
 - New Architecture and legacy architecture compatible.
 - Expo config plugin for the required permission.
 
@@ -76,6 +80,28 @@ Then rebuild the native app. Autolinking picks the module up from `expo-module.c
 ---
 
 ## Usage
+
+```tsx
+import Wallpaper from '@sahilverma-dev/wallpaper-module';
+
+// Static wallpapers
+await Wallpaper.static.set({ uri: imageUri, target: 'home' });
+await Wallpaper.static.clear('both');
+
+// Video live wallpaper (configures + opens the system picker)
+await Wallpaper.live.applyVideo({
+  uri: videoUri,
+  loop: true,
+  muted: true,
+  scaling: 'crop',
+});
+
+// Inspection and capabilities
+const info = await Wallpaper.info.get();
+const caps = await Wallpaper.device.getCapabilities();
+```
+
+Flat named exports remain available:
 
 ```tsx
 import {
@@ -162,7 +188,7 @@ import {
   setLiveWallpaperImage,
   openLiveWallpaperPicker,
   getCurrentLiveWallpaper,
-  clearLiveWallpaperImage,
+  clearLiveWallpaper,
 } from '@sahilverma-dev/wallpaper-module';
 
 // 1. Choose the image the service renders (optional).
@@ -178,7 +204,7 @@ if (current?.isOurs) {
 }
 
 // 4. Revert to the animated gradient at any time.
-await clearLiveWallpaperImage();
+await clearLiveWallpaper();
 ```
 
 `setLiveWallpaperImage` copies the image into the app's private storage, so the
@@ -205,6 +231,47 @@ app is in the background; animation pauses whenever the wallpaper is not visible
   controlled by the OS and varies by version/OEM.
 - **Uninstalling the app** removes the service; Android reverts to the default
   wallpaper.
+
+---
+
+## Video live wallpapers
+
+The bundled service can loop a video instead of an image. Media3 ExoPlayer is
+included as a native dependency; consumers do not need to install anything extra.
+
+```ts
+import Wallpaper from '@sahilverma-dev/wallpaper-module';
+
+// Configure only (no activation).
+await Wallpaper.live.setVideo({
+  uri: videoUri,        // file://, content://, http(s):// or absolute path
+  loop: true,           // default true
+  muted: true,          // default true
+  speed: 1,             // 0.25 – 3
+  scaling: 'crop',      // 'crop' | 'fit' | 'fill'
+});
+
+// Configure and open the system picker in one call.
+await Wallpaper.live.applyVideo({ uri: videoUri, scaling: 'crop' });
+```
+
+- **Scaling:** `crop` fills the screen and crops overflow (default), `fit`
+  letterboxes the whole frame, `fill` stretches. Implemented with Media3's
+  effects pipeline, not by stretching the raw surface.
+- **Lifecycle:** playback pauses when the wallpaper is not visible and resumes
+  when it returns. The player is released when the service is destroyed.
+- **Failures:** invalid files are rejected before activation; playback errors,
+  deleted files and OOM fall back to the gradient. The service never crashes.
+- **Limits:** 200 MB source file, at least one video track, minimum duration
+  0.25 s. MP4/H.264, WebM and MKV are supported through the device's decoders.
+- **Audio:** muted by default. Set `muted: false` for audio; the player does not
+  request audio focus, so respect your app's audio policy.
+- **Replacement:** configuring a new image or video replaces the previous media.
+  Only one active media item is stored at a time.
+- **Target screen:** the system picker/chooser decides home, lock or both
+  (Android 14+ asks the user). Apps cannot force a live wallpaper target.
+- **Static wallpapers:** calling `setWallpaper()` replaces an active video live
+  wallpaper, exactly like an image live wallpaper.
 
 ---
 
@@ -250,10 +317,76 @@ Returns whether device policy currently permits changing the wallpaper. Returns 
 Copies the image into app storage and updates a running live wallpaper
 immediately. Does **not** activate the live wallpaper.
 
+### `clearLiveWallpaper(): Promise<void>`
+
+Deletes any configured live wallpaper image or video. The active live wallpaper
+falls back to its animated gradient; it stays active.
+
 ### `clearLiveWallpaperImage(): Promise<void>`
 
-Deletes the configured image. The active live wallpaper falls back to its
-animated gradient; it stays active.
+Deprecated alias of `clearLiveWallpaper()` kept for 0.2.x compatibility.
+
+### `setLiveWallpaperVideo(options): Promise<void>`
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `uri` | `string` | — | Same URI formats as `setWallpaper`. |
+| `loop` | `boolean` | `true` | Loop playback. |
+| `muted` | `boolean` | `true` | Disable audio. |
+| `speed` | `number` | `1` | Playback speed, 0.25–3. |
+| `scaling` | `'crop' \| 'fit' \| 'fill'` | `'crop'` | Cover, letterbox or stretch. |
+
+Copies and validates the video, then updates a running live wallpaper
+immediately. Does **not** activate the live wallpaper.
+
+### `applyLiveWallpaperImage(options)` / `applyLiveWallpaperVideo(options)`
+
+Configure the media and open the system picker in one call. Resolves with:
+
+```ts
+{ requiresConfirmation: true }
+```
+
+The picker result is not observable; re-check with `getCurrentLiveWallpaper()`
+or `Wallpaper.info.get()`.
+
+### `clearWallpaper(target?): Promise<void>`
+
+Restores the system default wallpaper. `target` is `'both'` (default), `'home'`
+or `'lock'`. Single-screen clearing requires Android 9+; older devices throw
+`E_UNSUPPORTED_API_LEVEL` for `'home'`/`'lock'`.
+
+### `getWallpaperCapabilities(): Promise<WallpaperCapabilities>`
+
+```ts
+{
+  apiLevel: number;
+  staticWallpapers: boolean;
+  wallpaperSettingAllowed: boolean;
+  liveWallpapers: boolean;
+  liveWallpaperPicker: boolean;
+  videoLiveWallpapers: boolean;
+  lockScreenWallpapers: boolean;
+  maxImageBytes: number;   // 50 MB
+  maxImagePixels: number;  // 32 MP
+  maxVideoBytes: number;   // 200 MB
+  minVideoSpeed: number;   // 0.25
+  maxVideoSpeed: number;   // 3
+}
+```
+
+Resolves to conservative `false`/`0` values on non-Android platforms.
+
+### `getWallpaperInfo(): Promise<WallpaperInfoSummary>`
+
+```ts
+{
+  homeId: number;
+  lockId: number;
+  live: LiveWallpaperInfo | null;
+  type: 'static' | 'live';
+}
+```
 
 ### `isLiveWallpaperSupported(): Promise<boolean>`
 
@@ -278,14 +411,47 @@ Android). Otherwise:
 Opens the system preview for the bundled service. Resolves when the picker
 starts; Android gives no confirmation result.
 
+### Namespaced API
+
+```ts
+Wallpaper.static.set(options)
+Wallpaper.static.clear(target?)
+Wallpaper.static.isSupported()
+Wallpaper.static.isAllowed()
+Wallpaper.static.getId(target?)
+
+Wallpaper.live.setImage(options)
+Wallpaper.live.setVideo(options)
+Wallpaper.live.applyImage(options)
+Wallpaper.live.applyVideo(options)
+Wallpaper.live.clear()
+Wallpaper.live.isSupported()
+Wallpaper.live.getCurrent()
+Wallpaper.live.openPicker()   // alias: preview()
+
+Wallpaper.info.get()
+Wallpaper.info.getId(target)
+Wallpaper.device.getCapabilities()
+Wallpaper.system.openLiveWallpaperPicker()
+```
+
 ### Live wallpaper types
 
 ```ts
 type LiveWallpaperMotion = 'pan' | 'none';
+type VideoScaling = 'crop' | 'fit' | 'fill';
 
 interface SetLiveWallpaperImageOptions {
   uri: string;
   motion?: LiveWallpaperMotion;
+}
+
+interface SetLiveWallpaperVideoOptions {
+  uri: string;
+  loop?: boolean;
+  muted?: boolean;
+  speed?: number;
+  scaling?: VideoScaling;
 }
 ```
 
@@ -305,14 +471,15 @@ type WallpaperScreen = 'home' | 'lock';
 | `E_INVALID_URI` | Malformed URI, unsupported scheme, or a base64 `data:` URI. |
 | `E_IMAGE_NOT_FOUND` | File missing, unreadable, or content URI without permission. |
 | `E_DOWNLOAD_FAILED` | Remote download failed, timed out, or returned a non-2xx status. |
-| `E_UNSUPPORTED_FORMAT` | Not a JPEG, PNG or WebP image. |
-| `E_IMAGE_TOO_LARGE` | Live wallpaper image exceeds 50 MB compressed or 32 megapixels decoded. |
+| `E_UNSUPPORTED_FORMAT` | Not a supported image (JPEG/PNG/WebP) or the file has no video track. |
+| `E_IMAGE_TOO_LARGE` | Live media exceeds limits (image 50 MB/32 MP, video 200 MB). |
 | `E_WALLPAPER_NOT_ALLOWED` | Device/policy does not allow changing wallpapers. |
 | `E_WALLPAPER_FAILED` | Android rejected the operation, or the native module is missing. |
 | `E_UNSUPPORTED_TARGET` | Invalid target value (`getWallpaperId` rejects `'both'`). |
 | `E_UNSUPPORTED_PLATFORM` | Called on iOS/web. |
-| `E_INVALID_ARGUMENT` | An option has the wrong type or an invalid crop/motion. |
+| `E_INVALID_ARGUMENT` | An option has the wrong type or an invalid crop/motion/speed/scaling. |
 | `E_LIVE_WALLPAPER_UNAVAILABLE` | Device lacks live wallpaper support or a picker. |
+| `E_UNSUPPORTED_API_LEVEL` | Operation needs a newer Android version (single-screen clear). |
 
 All rejections are `WallpaperError` instances with a `code`, a readable `message`, and the original native `cause`.
 
@@ -323,6 +490,13 @@ All rejections are `WallpaperError` instances with a `code`, a readable `message
 ### Supported image formats
 
 JPEG, PNG and WebP. The native layer sniffs the magic bytes before calling `WallpaperManager`, so a `.jpg` extension on an HTML error page is rejected early.
+
+### Supported video formats
+
+MP4/H.264, WebM and MKV — anything the device's MediaCodec decoders support.
+The native layer verifies there is at least one video track and that the
+duration is usable, so audio-only or corrupt files are rejected before storage.
+Media3 ExoPlayer is bundled; no extra dependency is required in the consuming app.
 
 ### URI handling
 
@@ -342,6 +516,10 @@ Live wallpaper images follow the same rule: the file is copied to app storage,
 validated, and decoded with sampling (max 2560 px on the long edge). Decoded
 frames are released when the service is destroyed, and the service falls back to
 a gradient if decoding fails or memory is exhausted.
+
+Videos are not loaded into memory as bitmaps; Media3 decodes them directly to
+the wallpaper surface. A 200 MB file cap keeps storage bounded, and playback
+stops when the wallpaper is hidden.
 
 ### Lock screen caveats
 
@@ -375,7 +553,8 @@ npx expo run:android
 ```
 
 The example applies a bundled 1080×1920 PNG, a gallery image, and a remote image.
-It also configures the bundled live wallpaper and opens the system picker.
+It also configures the bundled live wallpaper (image and a bundled 4-second MP4)
+and opens the system picker.
 
 ### Manual Android test matrix
 
@@ -396,6 +575,13 @@ It also configures the bundled live wallpaper and opens the system picker.
 | 60 MB live image | `E_IMAGE_TOO_LARGE` |
 | 40 MP live image | `E_IMAGE_TOO_LARGE` |
 | Motion `'none'` | Static rendering, no frame loop |
+| Bundled MP4 configured | File saved under `files/live_wallpaper/videos` |
+| Video picker confirmed | Home/lock chooser applies the video |
+| Video scaling `'fit'` | Whole frame visible with letterboxing |
+| Video scaling `'crop'` | Full-screen, overflow cropped |
+| Video deleted while active | Gradient fallback, no crash |
+| 250 MB video | `E_IMAGE_TOO_LARGE` |
+| Audio-only file renamed `.mp4` | `E_UNSUPPORTED_FORMAT` |
 | Setting a static wallpaper while live is active | Static wallpaper replaces the live one |
 | Expo Go | `E_WALLPAPER_FAILED` with development-build hint |
 
@@ -406,7 +592,8 @@ Test on at least one physical device; emulator behavior for lock screens is not 
 ## Roadmap
 
 - `0.1.0` — Android implementation, URI handling, typed errors, Expo + CLI support.
-- `0.2.0` — Live wallpaper service, picker flow, reliability improvements.
+- `0.2.0` — Image live wallpaper service and picker flow.
+- `0.3.0` — Video live wallpapers, namespaced API, capability detection.
 - `1.0.0` — Stable public API.
 
 Out of scope: iOS wallpapers, scheduling/rotation, gallery UI, custom per-frame

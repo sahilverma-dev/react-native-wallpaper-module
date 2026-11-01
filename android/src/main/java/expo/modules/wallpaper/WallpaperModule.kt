@@ -3,6 +3,7 @@ package expo.modules.wallpaper
 import android.app.WallpaperManager
 import android.content.Context
 import android.graphics.Rect
+import android.os.Build
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.IOException
@@ -55,8 +56,32 @@ class WallpaperModule : Module() {
       LiveWallpaperConfigStore.saveImage(context, uri, normalizeMotion(motion))
     }
 
+    AsyncFunction("setLiveWallpaperVideo") { uri: String, loop: Boolean, muted: Boolean, speed: Double, scaling: String ->
+      LiveWallpaperConfigStore.saveVideo(
+        context = context,
+        uri = uri,
+        loop = loop,
+        muted = muted,
+        speed = normalizeSpeed(speed),
+        scaling = normalizeScaling(scaling)
+      )
+    }
+
+    AsyncFunction("clearLiveWallpaper") {
+      LiveWallpaperConfigStore.clear(context)
+    }
+
+    // Kept as an alias for apps that used the image-only API.
     AsyncFunction("clearLiveWallpaperImage") {
-      LiveWallpaperConfigStore.clearImage(context)
+      LiveWallpaperConfigStore.clear(context)
+    }
+
+    AsyncFunction("clearWallpaper") { target: String ->
+      clearStaticWallpaper(target)
+    }
+
+    AsyncFunction("getWallpaperCapabilities") {
+      WallpaperCapabilities.build(context)
     }
 
     AsyncFunction("openLiveWallpaperPicker") {
@@ -73,6 +98,66 @@ class WallpaperModule : Module() {
     )
   }
 
+  private fun normalizeScaling(value: String): String = when (value.lowercase()) {
+    LiveWallpaperConfigStore.SCALING_FILL -> LiveWallpaperConfigStore.SCALING_FILL
+    LiveWallpaperConfigStore.SCALING_FIT -> LiveWallpaperConfigStore.SCALING_FIT
+    LiveWallpaperConfigStore.SCALING_CROP -> LiveWallpaperConfigStore.SCALING_CROP
+    else -> throw WallpaperException(
+      WallpaperErrorCode.INVALID_ARGUMENT,
+      "Invalid video scaling \"$value\". Expected \"fill\", \"fit\" or \"crop\"."
+    )
+  }
+
+  private fun normalizeSpeed(value: Double): Float {
+    if (!value.isFinite() ||
+      value < LiveWallpaperConfigStore.MIN_VIDEO_SPEED ||
+      value > LiveWallpaperConfigStore.MAX_VIDEO_SPEED
+    ) {
+      throw WallpaperException(
+        WallpaperErrorCode.INVALID_ARGUMENT,
+        "Invalid playback speed. Expected a number between " +
+          "${LiveWallpaperConfigStore.MIN_VIDEO_SPEED} and ${LiveWallpaperConfigStore.MAX_VIDEO_SPEED}."
+      )
+    }
+    return value.toFloat()
+  }
+
+  private fun clearStaticWallpaper(target: String) {
+    val normalizedTarget = target.lowercase()
+    val which = WallpaperTarget.fromString(normalizedTarget).flags
+    ensureWallpaperAllowed()
+
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P && normalizedTarget != "both") {
+      throw WallpaperException(
+        WallpaperErrorCode.UNSUPPORTED_API_LEVEL,
+        "Clearing only the home or lock wallpaper requires Android 9 (API 28). " +
+          "Pass \"both\" or clear on a newer device."
+      )
+    }
+
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        wallpaperManager.clear(which)
+      } else {
+        // Android 7/8 only support clearing the whole wallpaper.
+        @Suppress("DEPRECATION")
+        wallpaperManager.clear()
+      }
+    } catch (error: IOException) {
+      throw WallpaperException(
+        WallpaperErrorCode.WALLPAPER_FAILED,
+        "Android could not clear the wallpaper.",
+        error
+      )
+    } catch (error: SecurityException) {
+      throw WallpaperException(
+        WallpaperErrorCode.WALLPAPER_NOT_ALLOWED,
+        "The app is not allowed to clear the wallpaper.",
+        error
+      )
+    }
+  }
+
   private fun applyWallpaper(
     uri: String,
     target: String,
@@ -82,7 +167,7 @@ class WallpaperModule : Module() {
     val wallpaperTarget = WallpaperTarget.fromString(target)
     ensureWallpaperAllowed()
 
-    val resultId = WallpaperImageSourceResolver.open(context, uri).use { source ->
+    val resultId = WallpaperMediaSourceResolver.openImage(context, uri).use { source ->
       try {
         wallpaperManager.setStream(source.stream, crop, allowBackup, wallpaperTarget.flags)
       } catch (error: SecurityException) {

@@ -1,6 +1,8 @@
 import {
+  applyLiveWallpaperVideo,
   clearLiveWallpaperImage,
   getCurrentLiveWallpaper,
+  getWallpaperCapabilities,
   getWallpaperId,
   isLiveWallpaperSupported,
   isSetWallpaperAllowed,
@@ -8,9 +10,12 @@ import {
   isWallpaperSupported,
   openLiveWallpaperPicker,
   setLiveWallpaperImage,
+  setLiveWallpaperVideo,
   setWallpaper,
   type LiveWallpaperInfo,
   type LiveWallpaperMotion,
+  type VideoScaling,
+  type WallpaperCapabilities,
   type WallpaperTarget,
 } from '@sahilverma-dev/wallpaper-module';
 import { Asset } from 'expo-asset';
@@ -26,8 +31,8 @@ import {
   View,
 } from 'react-native';
 
-
 const REMOTE_IMAGE = 'https://picsum.photos/1080/1920';
+const SAMPLE_VIDEO = require('./assets/test-video.mp4');
 const SAMPLE_IMAGE = require('./assets/wallpaper.png');
 
 type Capabilities = {
@@ -46,16 +51,18 @@ const EMPTY_CAPABILITIES: Capabilities = {
 
 export default function App() {
   const [capabilities, setCapabilities] = useState<Capabilities>(EMPTY_CAPABILITIES);
+  const [deviceCapabilities, setDeviceCapabilities] = useState<WallpaperCapabilities | null>(null);
   const [liveSupported, setLiveSupported] = useState<boolean | null>(null);
   const [liveInfo, setLiveInfo] = useState<LiveWallpaperInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState('Ready. Apply a sample wallpaper to get started.');
 
   const refreshCapabilities = useCallback(async () => {
-    const [supported, allowed, live] = await Promise.all([
+    const [supported, allowed, live, device] = await Promise.all([
       isWallpaperSupported(),
       isSetWallpaperAllowed(),
       isLiveWallpaperSupported(),
+      getWallpaperCapabilities().catch(() => null),
     ]);
     const [homeId, lockId, currentLive] = await Promise.all([
       getWallpaperId('home').catch(() => null),
@@ -65,6 +72,7 @@ export default function App() {
     setCapabilities({ supported, allowed, homeId, lockId });
     setLiveSupported(live);
     setLiveInfo(currentLive);
+    setDeviceCapabilities(device);
   }, []);
 
   useEffect(() => {
@@ -157,6 +165,59 @@ export default function App() {
     }
   }, []);
 
+  const getSampleVideoUri = useCallback(async () => {
+    const asset = Asset.fromModule(SAMPLE_VIDEO);
+    await asset.downloadAsync();
+    return asset.localUri ?? asset.uri;
+  }, []);
+
+  const configureVideo = useCallback(
+    async (scaling: VideoScaling) => {
+      setBusy(true);
+      setLog(`Preparing the bundled MP4 (${scaling})…`);
+      try {
+        const uri = await getSampleVideoUri();
+        await setLiveWallpaperVideo({
+          uri,
+          loop: true,
+          muted: true,
+          scaling,
+        });
+        setLog('✓ Video saved. Open the system picker to apply it.');
+        await refreshCapabilities();
+      } catch (error) {
+        setLog(`✗ Could not configure the video wallpaper.\n${describeError(error)}`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [getSampleVideoUri, refreshCapabilities]
+  );
+
+  const applyVideo = useCallback(async () => {
+    setBusy(true);
+    setLog('Preparing video and opening the system picker…');
+    try {
+      const uri = await getSampleVideoUri();
+      const result = await applyLiveWallpaperVideo({
+        uri,
+        loop: true,
+        muted: true,
+        scaling: 'crop',
+      });
+      setLog(
+        `System picker opened. Confirm there, then press Refresh.\nrequiresConfirmation: ${String(
+          result.requiresConfirmation
+        )}`
+      );
+      await refreshCapabilities();
+    } catch (error) {
+      setLog(`✗ Could not apply the video wallpaper.\n${describeError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [getSampleVideoUri, refreshCapabilities]);
+
   const pickFromGallery = useCallback(
     async (target: WallpaperTarget) => {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -194,6 +255,14 @@ export default function App() {
           <Row label="Setting allowed" value={formatFlag(capabilities.allowed)} />
           <Row label="Home wallpaper id" value={formatId(capabilities.homeId)} />
           <Row label="Lock wallpaper id" value={formatId(capabilities.lockId)} />
+          <Row
+            label="Video live wallpapers"
+            value={formatFlag(deviceCapabilities?.videoLiveWallpapers ?? null)}
+          />
+          <Row
+            label="Android API"
+            value={deviceCapabilities ? String(deviceCapabilities.apiLevel) : '…'}
+          />
           <Pressable
             accessibilityRole="button"
             onPress={() => refreshCapabilities().catch((e) => setLog(describeError(e)))}
@@ -270,6 +339,37 @@ export default function App() {
             onPress={clearLiveImage}
             style={[styles.secondaryButton, busy && styles.disabled]}>
             <Text style={styles.secondaryButtonText}>Clear image (gradient)</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Video live wallpaper</Text>
+          <Text style={styles.cardHint}>
+            Looped MP4 rendered by Media3 with cover/fit scaling. Requires confirmation in the
+            system picker.
+          </Text>
+          <View style={styles.buttonRow}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => configureVideo('crop')}
+              style={[styles.primaryButton, busy && styles.disabled]}>
+              <Text style={styles.primaryButtonText}>Configure · crop</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => configureVideo('fit')}
+              style={[styles.primaryButton, busy && styles.disabled]}>
+              <Text style={styles.primaryButtonText}>Configure · fit</Text>
+            </Pressable>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={applyVideo}
+            style={[styles.secondaryButton, busy && styles.disabled]}>
+            <Text style={styles.secondaryButtonText}>Apply video (opens picker)</Text>
           </Pressable>
         </View>
 

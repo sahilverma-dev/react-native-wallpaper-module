@@ -4,6 +4,8 @@ import type {
   LiveWallpaperInfo,
   LiveWallpaperMotion,
   SetWallpaperResult,
+  VideoScaling,
+  WallpaperCapabilities,
   WallpaperCrop,
   WallpaperScreen,
   WallpaperTarget,
@@ -32,6 +34,20 @@ export declare class WallpaperNativeModule extends NativeModule<Record<string, n
   getCurrentLiveWallpaper(): Promise<LiveWallpaperInfo | null>;
 
   setLiveWallpaperImage(uri: string, motion: LiveWallpaperMotion): Promise<void>;
+
+  setLiveWallpaperVideo(
+    uri: string,
+    loop: boolean,
+    muted: boolean,
+    speed: number,
+    scaling: VideoScaling
+  ): Promise<void>;
+
+  clearLiveWallpaper(): Promise<void>;
+
+  clearWallpaper(target: WallpaperTarget): Promise<void>;
+
+  getWallpaperCapabilities(): Promise<WallpaperCapabilities>;
 
   clearLiveWallpaperImage(): Promise<void>;
 

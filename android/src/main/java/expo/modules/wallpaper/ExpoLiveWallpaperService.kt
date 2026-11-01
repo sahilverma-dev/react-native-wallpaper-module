@@ -9,11 +9,22 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Shader
 import android.media.ExifInterface
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.service.wallpaper.WallpaperService
+import android.view.Surface
 import android.view.SurfaceHolder
+import androidx.annotation.OptIn
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.Presentation
+import androidx.media3.exoplayer.ExoPlayer
 import java.io.File
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -30,10 +41,12 @@ private const val GRADIENT_DURATION_MS = 12_000L
  *
  * Android does not let apps switch live wallpapers programmatically, so the
  * module exposes `openLiveWallpaperPicker()` and this service appears in the
- * system preview/picker. It either renders a configured image with a slow
- * pan/zoom or, when no image is configured (or the file disappeared), an
- * animated gradient.
+ * system preview/picker. It renders either:
+ * - a configured image with slow pan/zoom,
+ * - a configured video through Media3 ExoPlayer (loop/mute/speed/fill modes),
+ * - or an animated gradient when no media is configured or playback fails.
  */
+@OptIn(UnstableApi::class)
 class ExpoLiveWallpaperService : WallpaperService() {
   override fun onCreateEngine(): Engine = LiveWallpaperEngine()
 
@@ -42,6 +55,16 @@ class ExpoLiveWallpaperService : WallpaperService() {
     private val loader = Executors.newSingleThreadExecutor()
     private val photoPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
     private val gradientPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    private var config = LiveWallpaperConfig(
+      kind = null,
+      file = null,
+      motion = LiveWallpaperConfigStore.MOTION_PAN,
+      loop = true,
+      muted = true,
+      speed = 1f,
+      scaling = LiveWallpaperConfigStore.SCALING_CROP
+    )
 
     private var bitmap: Bitmap? = null
     private var bitmapKey: String? = null
@@ -57,10 +80,17 @@ class ExpoLiveWallpaperService : WallpaperService() {
     private var animate = true
     private var offsetX = 0f
 
+    private var player: ExoPlayer? = null
+    private var videoSurface: Surface? = null
+    private var videoMediaKey: String? = null
+    private var videoEffectsKey: String? = null
+    private var videoActive = false
+    private var videoFailed = false
+
     private val frameRunnable = object : Runnable {
       override fun run() {
         frameScheduled = false
-        if (destroyed || !visible) {
+        if (destroyed || !visible || videoActive) {
           return
         }
         drawFrame()
@@ -84,8 +114,9 @@ class ExpoLiveWallpaperService : WallpaperService() {
       destroyed = true
       handler.removeCallbacksAndMessages(null)
       LiveWallpaperConfigStore.removeListener(configListener)
-      loader.shutdownNow()
+      releasePlayer()
       recycleBitmap()
+      loader.shutdownNow()
       super.onDestroy()
     }
 
@@ -95,9 +126,16 @@ class ExpoLiveWallpaperService : WallpaperService() {
 
       if (visible) {
         startedAt = SystemClock.elapsedRealtime()
-        drawFrame()
-        scheduleNextFrame()
+        if (videoActive) {
+          player?.play()
+        } else {
+          drawFrame()
+          scheduleNextFrame()
+        }
       } else {
+        if (videoActive) {
+          player?.pause()
+        }
         handler.removeCallbacks(frameRunnable)
         frameScheduled = false
       }
@@ -105,8 +143,14 @@ class ExpoLiveWallpaperService : WallpaperService() {
 
     override fun onSurfaceCreated(holder: SurfaceHolder) {
       super.onSurfaceCreated(holder)
-      drawFrame()
-      scheduleNextFrame()
+      videoSurface = holder.surface
+
+      if (videoActive) {
+        player?.setVideoSurface(videoSurface)
+      } else {
+        drawFrame()
+        scheduleNextFrame()
+      }
     }
 
     override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -118,21 +162,30 @@ class ExpoLiveWallpaperService : WallpaperService() {
         gradient = null
         gradientWidth = 0
         gradientHeight = 0
+        videoEffectsKey = null
       }
 
-      drawFrame()
-      scheduleNextFrame()
+      if (videoActive) {
+        updateVideoEffects()
+      } else {
+        drawFrame()
+        scheduleNextFrame()
+      }
     }
 
     override fun onSurfaceDestroyed(holder: SurfaceHolder) {
       super.onSurfaceDestroyed(holder)
+      player?.clearVideoSurface()
+      videoSurface = null
       handler.removeCallbacks(frameRunnable)
       frameScheduled = false
     }
 
     override fun onSurfaceRedrawNeeded(holder: SurfaceHolder) {
       super.onSurfaceRedrawNeeded(holder)
-      drawFrame()
+      if (!videoActive) {
+        drawFrame()
+      }
     }
 
     override fun onOffsetsChanged(
@@ -148,15 +201,186 @@ class ExpoLiveWallpaperService : WallpaperService() {
     }
 
     private fun scheduleNextFrame() {
-      if (destroyed || !visible || !animate || frameScheduled) {
+      if (destroyed || !visible || videoActive || !animate || frameScheduled) {
         return
       }
       frameScheduled = true
       handler.postDelayed(frameRunnable, FRAME_DELAY_MS)
     }
 
-    private fun drawFrame() {
+    private fun reloadConfig(force: Boolean) {
       if (destroyed) {
+        return
+      }
+
+      val next = LiveWallpaperConfigStore.read(this@ExpoLiveWallpaperService)
+      config = next
+      animate = next.animated
+      videoFailed = false
+      videoEffectsKey = null
+
+      when {
+        next.isVideo -> {
+          handler.removeCallbacks(frameRunnable)
+          frameScheduled = false
+          recycleBitmap()
+          videoActive = true
+          applyVideo(next.file!!, force)
+        }
+
+        next.kind == LiveWallpaperKind.IMAGE && next.file != null -> {
+          stopVideo()
+          loadImage(next.file, force)
+          drawFrame()
+          scheduleNextFrame()
+        }
+
+        else -> {
+          stopVideo()
+          recycleBitmap()
+          drawFrame()
+          scheduleNextFrame()
+        }
+      }
+    }
+
+    // region Video
+
+    private fun applyVideo(file: File, force: Boolean) {
+      val exoPlayer = ensurePlayer()
+      val key = "${file.absolutePath}:${file.length()}:${file.lastModified()}"
+
+      if (force || key != videoMediaKey) {
+        videoMediaKey = key
+        exoPlayer.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
+        exoPlayer.prepare()
+      }
+
+      exoPlayer.repeatMode = if (config.loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+      exoPlayer.volume = if (config.muted) 0f else 1f
+      exoPlayer.setPlaybackSpeed(config.speed)
+      updateVideoEffects()
+
+      if (visible) {
+        exoPlayer.play()
+      } else {
+        exoPlayer.pause()
+      }
+    }
+
+    private fun ensurePlayer(): ExoPlayer {
+      player?.let { return it }
+
+      val exoPlayer = ExoPlayer.Builder(this@ExpoLiveWallpaperService).build()
+      exoPlayer.setAudioAttributes(
+        AudioAttributes.Builder()
+          .setUsage(C.USAGE_MEDIA)
+          .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+          .build(),
+        false
+      )
+      exoPlayer.addListener(
+        object : Player.Listener {
+          override fun onPlayerError(error: PlaybackException) {
+            onVideoPlaybackError()
+          }
+        }
+      )
+
+      videoSurface?.let { exoPlayer.setVideoSurface(it) }
+      player = exoPlayer
+      return exoPlayer
+    }
+
+    private fun updateVideoEffects() {
+      val exoPlayer = player ?: return
+      val width = surfaceWidth
+      val height = surfaceHeight
+      if (width <= 0 || height <= 0) {
+        return
+      }
+
+      val key = "$width:$height:${config.scaling}"
+      if (key == videoEffectsKey) {
+        return
+      }
+
+      val layout = when (config.scaling) {
+        LiveWallpaperConfigStore.SCALING_FILL -> Presentation.LAYOUT_STRETCH_TO_FIT
+        LiveWallpaperConfigStore.SCALING_FIT -> Presentation.LAYOUT_SCALE_TO_FIT
+        else -> Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
+      }
+
+      exoPlayer.setVideoEffects(
+        listOf(Presentation.createForWidthAndHeight(width, height, layout))
+      )
+      videoEffectsKey = key
+    }
+
+    private fun onVideoPlaybackError() {
+      videoFailed = true
+      videoActive = false
+      releasePlayer()
+      drawFrame()
+      scheduleNextFrame()
+    }
+
+    private fun stopVideo() {
+      releasePlayer()
+      videoActive = false
+      videoFailed = false
+    }
+
+    private fun releasePlayer() {
+      val current = player
+      player = null
+      videoMediaKey = null
+      videoEffectsKey = null
+
+      if (current != null) {
+        runCatching {
+          current.clearVideoSurface()
+          current.stop()
+          current.release()
+        }
+      }
+    }
+
+    // endregion
+
+    private fun loadImage(file: File, force: Boolean) {
+      val key = "${file.absolutePath}:${file.length()}:${file.lastModified()}"
+      if (!force && key == bitmapKey) {
+        return
+      }
+
+      bitmapKey = key
+      recycleBitmap()
+
+      loader.execute {
+        val decoded = decodePhoto(file)
+        handler.post {
+          if (destroyed || bitmapKey != key) {
+            decoded?.recycle()
+            return@post
+          }
+          bitmap = decoded
+          drawFrame()
+          scheduleNextFrame()
+        }
+      }
+    }
+
+    private fun recycleBitmap() {
+      val previous = bitmap
+      bitmap = null
+      if (previous != null && !previous.isRecycled) {
+        previous.recycle()
+      }
+    }
+
+    private fun drawFrame() {
+      if (destroyed || videoActive) {
         return
       }
 
@@ -195,7 +419,6 @@ class ExpoLiveWallpaperService : WallpaperService() {
       val phase = if (animate) {
         val elapsedSeconds = (SystemClock.elapsedRealtime() - startedAt) / 1000f
         val cycle = (elapsedSeconds % ZOOM_DURATION_SECONDS) / ZOOM_DURATION_SECONDS
-        // Ping-pong between 0 and 1 so the zoom loops without a jump.
         1f - abs(cycle * 2f - 1f)
       } else {
         0f
@@ -244,53 +467,6 @@ class ExpoLiveWallpaperService : WallpaperService() {
       canvas.restore()
     }
 
-    private fun reloadConfig(force: Boolean) {
-      if (destroyed) {
-        return
-      }
-
-      val config = LiveWallpaperConfigStore.read(this@ExpoLiveWallpaperService)
-      animate = config.animated
-      val file = config.imageFile
-      val key = file?.let { "${it.absolutePath}:${it.length()}:${it.lastModified()}" }
-
-      if (!force && key == bitmapKey) {
-        drawFrame()
-        scheduleNextFrame()
-        return
-      }
-
-      bitmapKey = key
-      recycleBitmap()
-
-      if (file == null) {
-        drawFrame()
-        scheduleNextFrame()
-        return
-      }
-
-      loader.execute {
-        val decoded = decodePhoto(file)
-        handler.post {
-          if (destroyed || bitmapKey != key) {
-            decoded?.recycle()
-            return@post
-          }
-          bitmap = decoded
-          drawFrame()
-          scheduleNextFrame()
-        }
-      }
-    }
-
-    private fun recycleBitmap() {
-      val previous = bitmap
-      bitmap = null
-      if (previous != null && !previous.isRecycled) {
-        previous.recycle()
-      }
-    }
-
     private fun decodePhoto(file: File): Bitmap? {
       return try {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -312,7 +488,6 @@ class ExpoLiveWallpaperService : WallpaperService() {
         val decoded = BitmapFactory.decodeFile(file.absolutePath, options) ?: return null
         applyExifRotation(file, decoded)
       } catch (_: OutOfMemoryError) {
-        // Fall back to the gradient rather than letting the service crash.
         null
       } catch (_: Exception) {
         null

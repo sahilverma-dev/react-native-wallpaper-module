@@ -28,6 +28,8 @@ export const WALLPAPER_ERROR_CODES = [
   'E_INVALID_ARGUMENT',
   /** The device has no live wallpaper support or picker. */
   'E_LIVE_WALLPAPER_UNAVAILABLE',
+  /** The operation requires a newer Android version. */
+  'E_UNSUPPORTED_API_LEVEL',
 ] as const;
 
 export type WallpaperErrorCode = (typeof WALLPAPER_ERROR_CODES)[number];

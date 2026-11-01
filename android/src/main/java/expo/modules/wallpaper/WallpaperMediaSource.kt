@@ -14,10 +14,11 @@ import java.net.URI
 import java.net.UnknownHostException
 
 /**
- * A wallpaper stream plus the cleanup required after `WallpaperManager` is
- * done with it. Local files are closed; HTTP connections are disconnected.
+ * A media stream plus the cleanup required after `WallpaperManager`,
+ * `WallpaperService` or a file copy is done with it. Local files are closed;
+ * HTTP connections are disconnected.
  */
-internal class WallpaperImageSource(
+internal class WallpaperMediaSource(
   val stream: InputStream,
   private val onClose: () -> Unit
 ) : Closeable {
@@ -33,25 +34,40 @@ internal class WallpaperImageSource(
 
 /**
  * Turns a JavaScript URI into an InputStream without ever buffering the whole
- * image in memory or crossing the bridge as base64.
+ * file in memory or crossing the bridge as base64.
  */
-internal object WallpaperImageSourceResolver {
+internal object WallpaperMediaSourceResolver {
   private const val CONNECT_TIMEOUT_MS = 20_000
   private const val READ_TIMEOUT_MS = 30_000
   private const val BUFFER_SIZE = 16 * 1024
   private const val HEADER_SIZE = 12
-  private const val USER_AGENT = "wallpaper-module/0.1.0"
+  private const val USER_AGENT = "wallpaper-module/0.3.0"
 
-  fun open(context: Context, uriString: String): WallpaperImageSource {
+  /** Opens an image and validates that Android can decode it. */
+  fun openImage(context: Context, uriString: String): WallpaperMediaSource {
+    val source = open(context, uriString)
+    val buffered = BufferedInputStream(source.stream, BUFFER_SIZE)
+    try {
+      validateImageFormat(buffered)
+    } catch (error: Throwable) {
+      source.close()
+      throw error
+    }
+
+    return WallpaperMediaSource(buffered) { source.close() }
+  }
+
+  /** Opens any media file or URL, without image format validation. */
+  fun open(context: Context, uriString: String): WallpaperMediaSource {
     val trimmed = uriString.trim()
     if (trimmed.isEmpty()) {
-      throw WallpaperException(WallpaperErrorCode.INVALID_URI, "The image URI must not be empty.")
+      throw WallpaperException(WallpaperErrorCode.INVALID_URI, "The media URI must not be empty.")
     }
 
     val uri = Uri.parse(trimmed)
     val scheme = uri.scheme?.lowercase()
 
-    val source = when (scheme) {
+    return when (scheme) {
       null, "" -> openFile(trimmed)
       "file" -> openFile(uri.path ?: throw invalidUri(trimmed))
       "content" -> openContent(context, uri)
@@ -61,35 +77,25 @@ internal object WallpaperImageSourceResolver {
         "Unsupported URI scheme \"$scheme:\". Use \"file://\", \"content://\", \"http://\" or \"https://\"."
       )
     }
-
-    val buffered = BufferedInputStream(source.stream, BUFFER_SIZE)
-    try {
-      validateFormat(buffered)
-    } catch (error: Throwable) {
-      source.close()
-      throw error
-    }
-
-    return WallpaperImageSource(buffered) { source.close() }
   }
 
   private fun invalidUri(value: String) = WallpaperException(
     WallpaperErrorCode.INVALID_URI,
-    "Invalid image URI \"$value\"."
+    "Invalid media URI \"$value\"."
   )
 
-  private fun openFile(path: String): WallpaperImageSource {
+  private fun openFile(path: String): WallpaperMediaSource {
     val file = File(path)
     if (!file.exists() || !file.isFile) {
       throw WallpaperException(
         WallpaperErrorCode.IMAGE_NOT_FOUND,
-        "The image file does not exist: $path"
+        "The media file does not exist: $path"
       )
     }
     if (!file.canRead()) {
       throw WallpaperException(
         WallpaperErrorCode.IMAGE_NOT_FOUND,
-        "The image file cannot be read: $path"
+        "The media file cannot be read: $path"
       )
     }
 
@@ -98,44 +104,44 @@ internal object WallpaperImageSourceResolver {
     } catch (error: IOException) {
       throw WallpaperException(
         WallpaperErrorCode.IMAGE_NOT_FOUND,
-        "The image file could not be opened: $path",
+        "The media file could not be opened: $path",
         error
       )
     }
 
-    return WallpaperImageSource(stream) {}
+    return WallpaperMediaSource(stream) {}
   }
 
-  private fun openContent(context: Context, uri: Uri): WallpaperImageSource {
+  private fun openContent(context: Context, uri: Uri): WallpaperMediaSource {
     val stream = try {
       context.contentResolver.openInputStream(uri)
     } catch (error: SecurityException) {
       throw WallpaperException(
         WallpaperErrorCode.IMAGE_NOT_FOUND,
-        "No permission to read the image at $uri.",
+        "No permission to read the media at $uri.",
         error
       )
     } catch (error: IOException) {
       throw WallpaperException(
         WallpaperErrorCode.IMAGE_NOT_FOUND,
-        "The image at $uri could not be opened.",
+        "The media at $uri could not be opened.",
         error
       )
     } ?: throw WallpaperException(
       WallpaperErrorCode.IMAGE_NOT_FOUND,
-      "The image at $uri could not be opened."
+      "The media at $uri could not be opened."
     )
 
-    return WallpaperImageSource(stream) {}
+    return WallpaperMediaSource(stream) {}
   }
 
-  private fun openRemote(url: String): WallpaperImageSource {
+  private fun openRemote(url: String): WallpaperMediaSource {
     val parsedUrl = try {
       URI(url).toURL()
     } catch (error: Exception) {
       throw WallpaperException(
         WallpaperErrorCode.INVALID_URI,
-        "\"$url\" is not a valid image URL.",
+        "\"$url\" is not a valid media URL.",
         error
       )
     }
@@ -153,7 +159,7 @@ internal object WallpaperImageSourceResolver {
     connection.instanceFollowRedirects = true
     connection.connectTimeout = CONNECT_TIMEOUT_MS
     connection.readTimeout = READ_TIMEOUT_MS
-    connection.setRequestProperty("Accept", "image/*")
+    connection.setRequestProperty("Accept", "image/*,video/*")
     connection.setRequestProperty("User-Agent", USER_AGENT)
 
     try {
@@ -162,25 +168,25 @@ internal object WallpaperImageSourceResolver {
         status == HttpURLConnection.HTTP_NOT_FOUND || status == HttpURLConnection.HTTP_GONE ->
           throw WallpaperException(
             WallpaperErrorCode.IMAGE_NOT_FOUND,
-            "The image could not be found (HTTP $status): $url"
+            "The media could not be found (HTTP $status): $url"
           )
 
         status !in 200..299 ->
           throw WallpaperException(
             WallpaperErrorCode.DOWNLOAD_FAILED,
-            "The image download failed with HTTP $status: $url"
+            "The media download failed with HTTP $status: $url"
           )
       }
 
       if (connection.contentLengthLong == 0L) {
         throw WallpaperException(
           WallpaperErrorCode.DOWNLOAD_FAILED,
-          "The server returned an empty image: $url"
+          "The server returned an empty file: $url"
         )
       }
 
       val stream = connection.inputStream
-      return WallpaperImageSource(stream) { connection.disconnect() }
+      return WallpaperMediaSource(stream) { connection.disconnect() }
     } catch (error: WallpaperException) {
       connection.disconnect()
       throw error
@@ -188,14 +194,14 @@ internal object WallpaperImageSourceResolver {
       connection.disconnect()
       throw WallpaperException(
         WallpaperErrorCode.DOWNLOAD_FAILED,
-        "Could not resolve the image host. Check the device connection.",
+        "Could not resolve the media host. Check the device connection.",
         error
       )
     } catch (error: SocketTimeoutException) {
       connection.disconnect()
       throw WallpaperException(
         WallpaperErrorCode.DOWNLOAD_FAILED,
-        "The image download timed out: $url",
+        "The media download timed out: $url",
         error
       )
     } catch (error: IOException) {
@@ -207,7 +213,7 @@ internal object WallpaperImageSourceResolver {
       }
       throw WallpaperException(
         WallpaperErrorCode.DOWNLOAD_FAILED,
-        "The image could not be downloaded: ${error.message ?: url}.$hint",
+        "The media could not be downloaded: ${error.message ?: url}.$hint",
         error
       )
     }
@@ -217,7 +223,7 @@ internal object WallpaperImageSourceResolver {
    * Reads the magic bytes and rejects files that `WallpaperManager` cannot
    * decode. The stream is reset afterwards so it can be passed on untouched.
    */
-  private fun validateFormat(stream: BufferedInputStream) {
+  private fun validateImageFormat(stream: BufferedInputStream) {
     stream.mark(HEADER_SIZE)
     val header = ByteArray(HEADER_SIZE)
     var read = 0

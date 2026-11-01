@@ -95,6 +95,7 @@ describe('WALLPAPER_ERROR_CODES', () => {
       'E_UNSUPPORTED_PLATFORM',
       'E_INVALID_ARGUMENT',
       'E_LIVE_WALLPAPER_UNAVAILABLE',
+      'E_UNSUPPORTED_API_LEVEL',
     ]);
   });
 });

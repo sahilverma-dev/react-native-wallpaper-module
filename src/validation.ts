@@ -1,7 +1,9 @@
 import type {
   LiveWallpaperMotion,
   SetLiveWallpaperImageOptions,
+  SetLiveWallpaperVideoOptions,
   SetWallpaperOptions,
+  VideoScaling,
   WallpaperCrop,
   WallpaperScreen,
   WallpaperTarget,
@@ -200,5 +202,99 @@ export function normalizeSetLiveWallpaperImageOptions(
   return {
     uri: normalizeUri(options.uri),
     motion: normalizeMotion(options.motion),
+  };
+}
+
+export const MIN_VIDEO_SPEED = 0.25;
+export const MAX_VIDEO_SPEED = 3;
+
+export function normalizeLoop(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return true;
+  }
+  if (typeof value !== 'boolean') {
+    throw new WallpaperError('E_INVALID_ARGUMENT', '`loop` must be a boolean.');
+  }
+  return value;
+}
+
+export function normalizeMuted(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return true;
+  }
+  if (typeof value !== 'boolean') {
+    throw new WallpaperError('E_INVALID_ARGUMENT', '`muted` must be a boolean.');
+  }
+  return value;
+}
+
+export function normalizeSpeed(value: unknown): number {
+  if (value === undefined || value === null) {
+    return 1;
+  }
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < MIN_VIDEO_SPEED ||
+    value > MAX_VIDEO_SPEED
+  ) {
+    throw new WallpaperError(
+      'E_INVALID_ARGUMENT',
+      `\`speed\` must be a number between ${MIN_VIDEO_SPEED} and ${MAX_VIDEO_SPEED}.`
+    );
+  }
+  return value;
+}
+
+export function normalizeScaling(value: unknown): VideoScaling {
+  if (value === undefined || value === null) {
+    return 'crop';
+  }
+  if (value === 'fill' || value === 'fit' || value === 'crop') {
+    return value;
+  }
+  throw new WallpaperError(
+    'E_INVALID_ARGUMENT',
+    '`scaling` must be "fill", "fit" or "crop".'
+  );
+}
+
+export function normalizeClearTarget(value: unknown): WallpaperTarget {
+  if (value === undefined || value === null) {
+    return 'both';
+  }
+  if (typeof value === 'string' && TARGETS.includes(value)) {
+    return value as WallpaperTarget;
+  }
+  throw new WallpaperError(
+    'E_UNSUPPORTED_TARGET',
+    `Invalid wallpaper target ${JSON.stringify(value)}. Expected "home", "lock" or "both".`
+  );
+}
+
+export interface NormalizedSetLiveWallpaperVideoOptions {
+  uri: string;
+  loop: boolean;
+  muted: boolean;
+  speed: number;
+  scaling: VideoScaling;
+}
+
+export function normalizeSetLiveWallpaperVideoOptions(
+  options: SetLiveWallpaperVideoOptions
+): NormalizedSetLiveWallpaperVideoOptions {
+  if (typeof options !== 'object' || options === null || Array.isArray(options)) {
+    throw new WallpaperError(
+      'E_INVALID_ARGUMENT',
+      '`setLiveWallpaperVideo` expects an object with a `uri` string.'
+    );
+  }
+
+  return {
+    uri: normalizeUri(options.uri),
+    loop: normalizeLoop(options.loop),
+    muted: normalizeMuted(options.muted),
+    speed: normalizeSpeed(options.speed),
+    scaling: normalizeScaling(options.scaling),
   };
 }

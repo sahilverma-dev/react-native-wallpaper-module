@@ -1,15 +1,23 @@
 import { requireNativeModule } from 'expo';
 import { Platform } from 'react-native';
 
+import { Wallpaper } from '../Wallpaper';
 import {
+  applyLiveWallpaperImage,
+  applyLiveWallpaperVideo,
+  clearLiveWallpaper,
   clearLiveWallpaperImage,
+  clearWallpaper,
   getCurrentLiveWallpaper,
+  getWallpaperCapabilities,
   getWallpaperId,
+  getWallpaperInfo,
   isLiveWallpaperSupported,
   isSetWallpaperAllowed,
   isWallpaperSupported,
   openLiveWallpaperPicker,
   setLiveWallpaperImage,
+  setLiveWallpaperVideo,
   setWallpaper,
 } from '../WallpaperModule';
 import { setWallpaperNativeModule } from '../WallpaperNativeModule';
@@ -25,7 +33,11 @@ const nativeGetWallpaperId = jest.fn();
 const nativeIsLiveWallpaperSupported = jest.fn();
 const nativeGetCurrentLiveWallpaper = jest.fn();
 const nativeSetLiveWallpaperImage = jest.fn();
+const nativeSetLiveWallpaperVideo = jest.fn();
+const nativeClearLiveWallpaper = jest.fn();
 const nativeClearLiveWallpaperImage = jest.fn();
+const nativeClearWallpaper = jest.fn();
+const nativeGetWallpaperCapabilities = jest.fn();
 const nativeOpenLiveWallpaperPicker = jest.fn();
 
 const bridge = {
@@ -36,7 +48,11 @@ const bridge = {
   isLiveWallpaperSupported: nativeIsLiveWallpaperSupported,
   getCurrentLiveWallpaper: nativeGetCurrentLiveWallpaper,
   setLiveWallpaperImage: nativeSetLiveWallpaperImage,
+  setLiveWallpaperVideo: nativeSetLiveWallpaperVideo,
+  clearLiveWallpaper: nativeClearLiveWallpaper,
   clearLiveWallpaperImage: nativeClearLiveWallpaperImage,
+  clearWallpaper: nativeClearWallpaper,
+  getWallpaperCapabilities: nativeGetWallpaperCapabilities,
   openLiveWallpaperPicker: nativeOpenLiveWallpaperPicker,
 };
 
@@ -55,7 +71,24 @@ beforeEach(() => {
   nativeIsLiveWallpaperSupported.mockResolvedValue(true);
   nativeGetCurrentLiveWallpaper.mockResolvedValue(null);
   nativeSetLiveWallpaperImage.mockResolvedValue(undefined);
+  nativeSetLiveWallpaperVideo.mockResolvedValue(undefined);
+  nativeClearLiveWallpaper.mockResolvedValue(undefined);
   nativeClearLiveWallpaperImage.mockResolvedValue(undefined);
+  nativeClearWallpaper.mockResolvedValue(undefined);
+  nativeGetWallpaperCapabilities.mockResolvedValue({
+    apiLevel: 33,
+    staticWallpapers: true,
+    wallpaperSettingAllowed: true,
+    liveWallpapers: true,
+    liveWallpaperPicker: true,
+    videoLiveWallpapers: true,
+    lockScreenWallpapers: true,
+    maxImageBytes: 52428800,
+    maxImagePixels: 32000000,
+    maxVideoBytes: 209715200,
+    minVideoSpeed: 0.25,
+    maxVideoSpeed: 3,
+  });
   nativeOpenLiveWallpaperPicker.mockResolvedValue(undefined);
 
   setWallpaperNativeModule(bridge as never);
@@ -333,5 +366,230 @@ describe('live wallpapers', () => {
     expect(nativeSetLiveWallpaperImage).not.toHaveBeenCalled();
     expect(nativeClearLiveWallpaperImage).not.toHaveBeenCalled();
     expect(nativeOpenLiveWallpaperPicker).not.toHaveBeenCalled();
+  });
+});
+
+describe('video live wallpapers', () => {
+  it('configures a video with defaults', async () => {
+    await setLiveWallpaperVideo({ uri: 'file:///tmp/a.mp4' });
+
+    expect(nativeSetLiveWallpaperVideo).toHaveBeenCalledWith(
+      'file:///tmp/a.mp4',
+      true,
+      true,
+      1,
+      'crop'
+    );
+  });
+
+  it('forwards playback options', async () => {
+    await setLiveWallpaperVideo({
+      uri: 'https://example.com/a.mp4',
+      loop: false,
+      muted: false,
+      speed: 1.5,
+      scaling: 'fit',
+    });
+
+    expect(nativeSetLiveWallpaperVideo).toHaveBeenCalledWith(
+      'https://example.com/a.mp4',
+      false,
+      false,
+      1.5,
+      'fit'
+    );
+  });
+
+  it.each([
+    [null, 'E_INVALID_ARGUMENT'],
+    [{}, 'E_INVALID_URI'],
+    [{ uri: 'data:video/mp4;base64,AA' }, 'E_INVALID_URI'],
+    [{ uri: 'file:///a.mp4', loop: 'yes' }, 'E_INVALID_ARGUMENT'],
+    [{ uri: 'file:///a.mp4', muted: 1 }, 'E_INVALID_ARGUMENT'],
+    [{ uri: 'file:///a.mp4', speed: 0.1 }, 'E_INVALID_ARGUMENT'],
+    [{ uri: 'file:///a.mp4', speed: 4 }, 'E_INVALID_ARGUMENT'],
+    [{ uri: 'file:///a.mp4', speed: Number.NaN }, 'E_INVALID_ARGUMENT'],
+    [{ uri: 'file:///a.mp4', scaling: 'zoom' }, 'E_INVALID_ARGUMENT'],
+  ])('rejects invalid video options %j with %s', async (options, code) => {
+    await expect(setLiveWallpaperVideo(options as never)).rejects.toMatchObject({ code });
+    expect(nativeSetLiveWallpaperVideo).not.toHaveBeenCalled();
+  });
+
+  it('configures and opens the picker in one call', async () => {
+    await expect(
+      applyLiveWallpaperVideo({ uri: 'file:///a.mp4', scaling: 'fill' })
+    ).resolves.toEqual({ requiresConfirmation: true });
+
+    expect(nativeSetLiveWallpaperVideo).toHaveBeenCalledWith(
+      'file:///a.mp4',
+      true,
+      true,
+      1,
+      'fill'
+    );
+    expect(nativeOpenLiveWallpaperPicker).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not open the picker when configuration fails', async () => {
+    nativeSetLiveWallpaperVideo.mockRejectedValueOnce(
+      Object.assign(new Error('Too big'), { code: 'E_IMAGE_TOO_LARGE' })
+    );
+
+    await expect(applyLiveWallpaperVideo({ uri: 'file:///a.mp4' })).rejects.toMatchObject({
+      code: 'E_IMAGE_TOO_LARGE',
+    });
+    expect(nativeOpenLiveWallpaperPicker).not.toHaveBeenCalled();
+  });
+
+  it('configures and applies images through the same flow', async () => {
+    await expect(applyLiveWallpaperImage({ uri: 'file:///a.jpg' })).resolves.toEqual({
+      requiresConfirmation: true,
+    });
+
+    expect(nativeSetLiveWallpaperImage).toHaveBeenCalledWith('file:///a.jpg', 'pan');
+    expect(nativeOpenLiveWallpaperPicker).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears all live wallpaper media', async () => {
+    await clearLiveWallpaper();
+
+    expect(nativeClearLiveWallpaper).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('clearWallpaper', () => {
+  it('defaults to both screens', async () => {
+    await clearWallpaper();
+
+    expect(nativeClearWallpaper).toHaveBeenCalledWith('both');
+  });
+
+  it('forwards the target', async () => {
+    await clearWallpaper('lock');
+
+    expect(nativeClearWallpaper).toHaveBeenCalledWith('lock');
+  });
+
+  it('rejects invalid targets', async () => {
+    await expect(clearWallpaper('desktop' as never)).rejects.toMatchObject({
+      code: 'E_UNSUPPORTED_TARGET',
+    });
+    expect(nativeClearWallpaper).not.toHaveBeenCalled();
+  });
+
+  it('surfaces API-level errors', async () => {
+    nativeClearWallpaper.mockRejectedValueOnce(
+      Object.assign(new Error('Android 9 required'), { code: 'E_UNSUPPORTED_API_LEVEL' })
+    );
+
+    await expect(clearWallpaper('lock')).rejects.toMatchObject({
+      code: 'E_UNSUPPORTED_API_LEVEL',
+    });
+  });
+});
+
+describe('getWallpaperCapabilities', () => {
+  it('normalizes the native snapshot', async () => {
+    await expect(getWallpaperCapabilities()).resolves.toEqual({
+      apiLevel: 33,
+      staticWallpapers: true,
+      wallpaperSettingAllowed: true,
+      liveWallpapers: true,
+      liveWallpaperPicker: true,
+      videoLiveWallpapers: true,
+      lockScreenWallpapers: true,
+      maxImageBytes: 52428800,
+      maxImagePixels: 32000000,
+      maxVideoBytes: 209715200,
+      minVideoSpeed: 0.25,
+      maxVideoSpeed: 3,
+    });
+  });
+
+  it('coerces numeric strings from the bridge', async () => {
+    nativeGetWallpaperCapabilities.mockResolvedValueOnce({
+      apiLevel: '33',
+      maxVideoBytes: '209715200',
+    });
+
+    await expect(getWallpaperCapabilities()).resolves.toMatchObject({
+      apiLevel: 33,
+      maxVideoBytes: 209715200,
+      staticWallpapers: false,
+    });
+  });
+
+  it('returns a conservative snapshot off Android', async () => {
+    setPlatform('ios');
+
+    await expect(getWallpaperCapabilities()).resolves.toMatchObject({
+      apiLevel: 0,
+      staticWallpapers: false,
+      liveWallpapers: false,
+      maxVideoBytes: 0,
+    });
+    expect(nativeGetWallpaperCapabilities).not.toHaveBeenCalled();
+  });
+});
+
+describe('getWallpaperInfo', () => {
+  it('reports an active live wallpaper', async () => {
+    nativeGetWallpaperId.mockResolvedValueOnce(7).mockResolvedValueOnce(8);
+    nativeGetCurrentLiveWallpaper.mockResolvedValueOnce({
+      packageName: 'com.example',
+      className: 'com.example.Service',
+      isOurs: true,
+    });
+
+    await expect(getWallpaperInfo()).resolves.toEqual({
+      homeId: 7,
+      lockId: 8,
+      live: {
+        packageName: 'com.example',
+        className: 'com.example.Service',
+        isOurs: true,
+      },
+      type: 'live',
+    });
+  });
+
+  it('reports static wallpapers', async () => {
+    await expect(getWallpaperInfo()).resolves.toEqual({
+      homeId: 3,
+      lockId: 3,
+      live: null,
+      type: 'static',
+    });
+  });
+
+  it('tolerates unreadable ids', async () => {
+    nativeGetWallpaperId.mockRejectedValue(new Error('unavailable'));
+
+    await expect(getWallpaperInfo()).resolves.toMatchObject({ homeId: -1, lockId: -1 });
+  });
+});
+
+describe('namespaced API', () => {
+  it('exposes the same functions as the flat exports', () => {
+    expect(Wallpaper.static.set).toBe(setWallpaper);
+    expect(Wallpaper.static.clear).toBe(clearWallpaper);
+    expect(Wallpaper.static.isSupported).toBe(isWallpaperSupported);
+    expect(Wallpaper.static.isAllowed).toBe(isSetWallpaperAllowed);
+    expect(Wallpaper.static.getId).toBe(getWallpaperId);
+
+    expect(Wallpaper.live.setImage).toBe(setLiveWallpaperImage);
+    expect(Wallpaper.live.setVideo).toBe(setLiveWallpaperVideo);
+    expect(Wallpaper.live.applyImage).toBe(applyLiveWallpaperImage);
+    expect(Wallpaper.live.applyVideo).toBe(applyLiveWallpaperVideo);
+    expect(Wallpaper.live.clear).toBe(clearLiveWallpaper);
+    expect(Wallpaper.live.isSupported).toBe(isLiveWallpaperSupported);
+    expect(Wallpaper.live.getCurrent).toBe(getCurrentLiveWallpaper);
+    expect(Wallpaper.live.openPicker).toBe(openLiveWallpaperPicker);
+    expect(Wallpaper.live.preview).toBe(openLiveWallpaperPicker);
+
+    expect(Wallpaper.info.get).toBe(getWallpaperInfo);
+    expect(Wallpaper.info.getId).toBe(getWallpaperId);
+    expect(Wallpaper.device.getCapabilities).toBe(getWallpaperCapabilities);
+    expect(Wallpaper.system.openLiveWallpaperPicker).toBe(openLiveWallpaperPicker);
   });
 });

@@ -17,6 +17,7 @@ internal object WallpaperErrorCode {
   const val INVALID_ARGUMENT = "E_INVALID_ARGUMENT"
   const val IMAGE_TOO_LARGE = "E_IMAGE_TOO_LARGE"
   const val LIVE_WALLPAPER_UNAVAILABLE = "E_LIVE_WALLPAPER_UNAVAILABLE"
+  const val UNSUPPORTED_API_LEVEL = "E_UNSUPPORTED_API_LEVEL"
 }
 
 internal class WallpaperException(

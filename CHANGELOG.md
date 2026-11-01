@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+
+- Video live wallpapers powered by Media3 ExoPlayer: MP4/WebM/MKV, loop, mute and playback speed.
+- `fill`, `fit` and `crop` video scaling through the Media3 effects pipeline.
+- `Wallpaper.live.applyVideo()` / `applyImage()` — configure and open the system picker in one call.
+- Namespaced `Wallpaper` API (`static`, `live`, `info`, `device`, `system`) alongside the existing flat exports.
+- `Wallpaper.device.getCapabilities()` with API level, static/live/video support, picker and size limits.
+- `Wallpaper.info.get()` snapshot with wallpaper ids, active type and live wallpaper info.
+- `clearWallpaper(target)` to restore the system default (single-screen clear requires Android 9+).
+- New error code: `E_UNSUPPORTED_API_LEVEL`.
+- Bundled 4-second test video in the example app.
+
+### Changed
+
+- Live wallpaper media is now stored per kind (`images/`, `videos/`); configuring one kind removes the other.
+- `clearLiveWallpaperImage()` is now an alias for clearing all configured media.
+- Image and video URIs share one streaming resolver with a 200 MB video cap.
+
+### Safety
+
+- Video decode/playback errors, missing files and unsupported devices fall back to the gradient.
+- Video playback pauses when the wallpaper is not visible and resumes on return.
+- Unmuted playback is opt-in; the default is muted.
+
 ## 0.2.0
 
 ### Added

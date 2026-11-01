@@ -8,7 +8,7 @@ import {
 // Kept in sync with package.json. Reading package.json from the compiled
 // plugin would depend on the build output layout.
 const PLUGIN_NAME = '@sahilverma-dev/wallpaper-module';
-const PLUGIN_VERSION = '0.2.0';
+const PLUGIN_VERSION = '0.3.0';
 
 const withSetWallpaperPermission: ConfigPlugin = (config) =>
   withAndroidManifest(config, (configWithManifest) => {

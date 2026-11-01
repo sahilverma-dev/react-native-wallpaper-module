@@ -95,3 +95,66 @@ export interface LiveWallpaperInfo {
   /** `true` when the active live wallpaper is the one bundled with this module. */
   isOurs: boolean;
 }
+
+/** How the video is fitted to the wallpaper surface. */
+export type VideoScaling = 'fill' | 'fit' | 'crop';
+
+export interface SetLiveWallpaperVideoOptions {
+  /**
+   * Video used by the bundled live wallpaper. Supports `file://`,
+   * `content://`, `http(s)://` or an absolute path.
+   *
+   * The video is copied into the app's private storage, so the original file
+   * may be deleted afterwards. Limits: 200 MB.
+   */
+  uri: string;
+
+  /** Loop playback. Defaults to `true`. */
+  loop?: boolean;
+
+  /** Mute audio. Defaults to `true`. */
+  muted?: boolean;
+
+  /** Playback speed between 0.25 and 3. Defaults to `1`. */
+  speed?: number;
+
+  /**
+   * `'crop'` (default) fills the screen and crops overflow,
+   * `'fit'` shows the whole frame with letterboxing,
+   * `'fill'` stretches to the screen.
+   */
+  scaling?: VideoScaling;
+}
+
+export interface LiveWallpaperApplyResult {
+  /**
+   * Android requires the user to confirm a live wallpaper in the system
+   * picker. When this is `true`, the picker was opened; re-check with
+   * `getCurrentLiveWallpaper()` afterwards.
+   */
+  requiresConfirmation: true;
+}
+
+/** Device and package capability snapshot. */
+export interface WallpaperCapabilities {
+  apiLevel: number;
+  staticWallpapers: boolean;
+  wallpaperSettingAllowed: boolean;
+  liveWallpapers: boolean;
+  liveWallpaperPicker: boolean;
+  videoLiveWallpapers: boolean;
+  lockScreenWallpapers: boolean;
+  maxImageBytes: number;
+  maxImagePixels: number;
+  maxVideoBytes: number;
+  minVideoSpeed: number;
+  maxVideoSpeed: number;
+}
+
+/** One-shot wallpaper state for the active screens. */
+export interface WallpaperInfoSummary {
+  homeId: number;
+  lockId: number;
+  live: LiveWallpaperInfo | null;
+  type: 'static' | 'live';
+}
